@@ -209,6 +209,26 @@ def test_checkov_parser_handles_verbatim_real_payload():
     assert aws3.line == 1
 
 
+def test_trivy_parser_handles_verbatim_real_payload():
+    """Parse the captured real trivy 0.74.0 config-mode output, byte for byte."""
+    fixture = Path(__file__).parent / "fixtures" / "trivy_real.json"
+    raw = fixture.read_text(encoding="utf-8")
+
+    # provenance: the fixture must be what trivy itself wrote
+    document = json.loads(raw)
+    assert document["Trivy"]["Version"] == "0.74.0"
+    assert document["SchemaVersion"] == 2
+
+    findings = runner._parse_trivy(raw, "Trivy config")
+    by_rule = {f.rule_id: f for f in findings}
+
+    assert set(by_rule) == {"AWS-0026", "AWS-0027"}
+    aws26 = by_rule["AWS-0026"]
+    assert (aws26.severity, aws26.path, aws26.line) == ("HIGH", "main.tf", 1)
+    assert aws26.message == "EBS volumes must be encrypted"
+    assert by_rule["AWS-0027"].severity == "LOW"
+
+
 def test_success_with_unparseable_json_is_a_tool_failure(tmp_path, scanner_env):
     scanner_env.stdout_by = {"checkov": "<not json>"}
     results = runner.scan_path(tmp_path)
