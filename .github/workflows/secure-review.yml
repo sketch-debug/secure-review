@@ -39,7 +39,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install .
-          python -m pip install "checkov==3.3.19" "bandit==1.9.4"
+          python -m pip install "checkov==3.3.20" "bandit==1.9.4"
         shell: bash
 
       # v0.69.4 (March 2026) was compromised; pin a known-good release.
