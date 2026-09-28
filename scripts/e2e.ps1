@@ -18,6 +18,10 @@
       scanner to execute; only then are the exit-3 and exit-0 probes run.
     - REDUCED: trivy (not pip-installable) absent. The exit-1 probe is then
       REAL (scan reports the missing scanner); exit-3/exit-0 probes SKIP.
+    - FULL mode also re-parses the scan through the library and asserts the
+      emitted SARIF 2.1.0 log matches the parsed findings exactly.
+    - Pass -SkipShim to force REDUCED mode deterministically (skips the
+      checkov shim build even when csc.exe is available).
     - On machines where pip could not create checkov.exe (an apostrophe in
       the project path breaks the wrapper: this dev box), the script builds
       a thin checkov.exe shim with csc.exe that execs `python -m checkov.main`,
@@ -35,7 +39,11 @@
 #>
 
 param(
-    [string]$TrivyDir = ''
+    [string]$TrivyDir = '',
+    # Force REDUCED mode even when the environment could support FULL:
+    # skips the csc.exe checkov shim build and the trivy-dependent probes.
+    # Useful to prove the reduced path deterministically.
+    [switch]$SkipShim
 )
 
 Set-StrictMode -Version 2.0
@@ -64,19 +72,22 @@ function Write-Skip {
 # captured output; returns the process exit code. Does NOT stop on nonzero.
 function Invoke-SecureReview {
     param([string]$ArgLine, [ref]$Out)
+    $argList = @($ArgLine -split '\s+' | Where-Object { $_ })
     $cli = Join-Path $ProjectRoot '.venv\Scripts\secure-review.exe'
     $Out.Value = @()
     if (Test-Path -LiteralPath $cli) {
-        $proc = Start-Process -FilePath $cli -ArgumentList $ArgLine `
+        $proc = Start-Process -FilePath $cli -ArgumentList $argList `
             -NoNewWindow -Wait -PassThru -WorkingDirectory $ProjectRoot `
             -RedirectStandardOutput "$Script:Tmp\out.txt" `
             -RedirectStandardError  "$Script:Tmp\err.txt"
         $Out.Value = @(Get-Content -LiteralPath "$Script:Tmp\out.txt")
         return $proc.ExitCode
     }
-    # Fallback (development installs without the console script).
+    # Fallback: repo venv python when present, else python on PATH
+    # (CI installs the package into the setup-python interpreter).
     $py = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
-    $Out.Value = @(& $py -m secure_review.cli ($ArgLine -split ' ') 2>&1)
+    if (-not (Test-Path -LiteralPath $py)) { $py = 'python' }
+    $Out.Value = @(& $py -m secure_review.cli @argList 2>&1)
     return $LASTEXITCODE
 }
 
@@ -135,6 +146,10 @@ $trivyPresent = $false
 if ($TrivyDir -and (Test-Path -LiteralPath (Join-Path $TrivyDir 'trivy.exe'))) {
     $env:Path = "$TrivyDir;$env:Path"
     $trivyPresent = $true
+} elseif (-not $SkipShim) {
+    # Fall back to a trivy already on PATH (e.g. installed by CI).
+    $trivyCmd = Get-Command trivy -ErrorAction SilentlyContinue
+    if ($null -ne $trivyCmd) { $trivyPresent = $true }
 }
 
 # --- checkov runnability: .cmd wrappers are not executable by the runner --
@@ -152,7 +167,7 @@ if ($null -ne $checkovCmd) {
         $needShim = $true
     }
 }
-if ($needShim) {
+if ($needShim -and -not $SkipShim) {
     $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     if (-not (Test-Path -LiteralPath $csc)) {
         $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
@@ -301,6 +316,56 @@ if (-not $fullMode) {
 } else {
     $code = Invoke-SecureReview -ArgLine "scan $Target --fail-on none" -Out $out
     Write-Case -Name 'exit 3: default threshold, all scanners installed' -Expected 3 -Actual $code
+}
+
+# --- SARIF 2.1.0 emission through the real library (full mode) ----------
+if ($fullMode) {
+    $probePy = Join-Path $venvScripts 'python.exe'
+    if (-not (Test-Path -LiteralPath $probePy)) { $probePy = 'python' }
+    $probe = Join-Path $Script:Tmp 'sarif_probe.py'
+    @'
+import json
+import sys
+from pathlib import Path
+
+from secure_review.findings import Finding
+from secure_review.runner import scan_path
+from secure_review.sarif import to_json
+
+target = Path(sys.argv[1])
+results = scan_path(target)
+findings = [r.finding for r in results if r.finding is not None]
+assert findings, "no findings parsed; SARIF probe needs a vulnerable target"
+log = json.loads(to_json(findings))
+assert log["version"] == "2.1.0", log["version"]
+assert log["$schema"].endswith("sarif-2.1.0.json")
+run = log["runs"][0]
+assert run["tool"]["driver"]["name"] == "secure-review"
+assert len(run["results"]) == len(findings)
+for res, finding in zip(run["results"], findings):
+    assert res["ruleId"] == finding.rule_id
+    assert res["level"] in ("none", "note", "warning", "error")
+    assert res["properties"]["severity"] == finding.severity
+    assert res["properties"]["scanner"] == finding.scanner
+    assert res["message"]["text"] == finding.message
+    if finding.path is not None:
+        loc = res["locations"][0]["physicalLocation"]
+        assert loc["artifactLocation"]["uri"] == finding.path
+        if finding.line is not None:
+            assert loc["region"]["startLine"] == finding.line
+print("SARIF-OK {0}".format(len(run["results"])))
+'@ | Set-Content -LiteralPath $probe -Encoding ascii
+    $sarifOut = @(& $probePy $probe $Target 2>&1)
+    $sarifExit = $LASTEXITCODE
+    if ($sarifExit -eq 0 -and @($sarifOut | Where-Object { $_ -match 'SARIF-OK \d+' }).Count -gt 0) {
+        $Script:PassCount++
+        $okLine = ($sarifOut | Where-Object { $_ -match 'SARIF-OK' } | Select-Object -First 1)
+        Write-Host ("  [ok] SARIF 2.1.0 emission matches parsed findings ({0})" -f $okLine)
+    } else {
+        $Script:FailCount++
+        Write-Host ("  [FAIL] SARIF 2.1.0 emission probe (exit {0})" -f $sarifExit)
+        $sarifOut | ForEach-Object { Write-Host ("       {0}" -f $_) }
+    }
 }
 
 # --------------------------- summary ------------------------------------

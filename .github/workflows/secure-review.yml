@@ -89,3 +89,42 @@ jobs:
           name: secure-review-reports-${{ github.event.pull_request.number }}
           path: ${{ runner.temp }}/secure-review-reports/
           if-no-files-found: error
+
+  # Proves the exit-code contract and SARIF emission on Windows runners,
+  # via scripts/e2e.ps1 (FULL mode: pip-built checkov.exe works on normal
+  # paths; trivy found on PATH from setup-trivy). Same pinned actions.
+  e2e-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project, test deps, and scanners (pinned versions)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[test]"
+          python -m pip install "checkov==3.3.20" "bandit==1.9.4"
+        shell: bash
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.74.0
+
+      - name: Run test suite
+        run: python -m pytest -q
+        shell: bash
+
+      - name: Run e2e contract probes
+        run: scripts\e2e.ps1
+        shell: pwsh

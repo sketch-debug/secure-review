@@ -72,6 +72,7 @@ Through the **real console script**, on **real vulnerable and clean trees**:
 | `scan <vulnerable> --fail-on low` | exit **3** |
 | `scan <clean>` (default threshold) | exit **0** |
 | `scan <vulnerable>` when a scanner is missing | exit **1** (reduced mode) or **3** (full mode) |
+| SARIF emission (full mode) | **SARIF-OK n** — every parsed finding re-serialized through the library and asserted field-by-field (version 2.1.0, driver, ruleId, level, verbatim severity/scanner, message, uri, startLine) |
 
 It parses findings from all three real scanners (last full run: **24 findings** from checkov 3.3.20, trivy 0.74.0, bandit 1.9.4) and asserts the exact exit codes. It exits 0 iff no probe failed; skips are allowed.
 
@@ -81,6 +82,13 @@ The CLI exits 1 when **any** scanner is missing/failed — tool-error precedence
 
 - **FULL** — checkov executable, trivy present → all probes run, including exits 3/0/1-as-3.
 - **REDUCED** — trivy absent (it is not pip-installable) → exit-3 and exit-0 probes SKIP; the exit-1 probe becomes real (a scanner genuinely missing). Script still exits 0.
+- Force reduced mode deterministically with `-SkipShim` — skips the checkov shim build even when csc.exe is available, proving the reduced path on any machine:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\e2e.ps1 -SkipShim
+```
+
+The CLI fallback inside the script is CI-friendly: without a repo `.venv` it uses `python -m secure_review.cli` (the package as installed by pip), which is exactly the CI layout.
 
 ### How checkov becomes runnable on this box
 
@@ -121,11 +129,12 @@ Probes:
   [ok] exit 0: clean tree, default threshold -> exit 0 (expected 0)
   [ok] exit 0 output mentions expected markers
   [ok] exit 3: default threshold, all scanners installed -> exit 3 (expected 3)
+  [ok] SARIF 2.1.0 emission matches parsed findings (SARIF-OK 24)
 
-e2e summary: 10 passed, 0 failed, 0 skipped
+e2e summary: 11 passed, 0 failed, 0 skipped
 ```
 
-Reduced mode prints `[SKIP]` for the exit-3/exit-0 probes with the reason, and the exit-1 probe becomes the real missing-scanner probe.
+Reduced mode prints `[SKIP]` for the exit-3/exit-0 probes with the reason, and the exit-1 probe becomes the real missing-scanner probe (verified: `6 passed, 0 failed, 1 skipped` with `-SkipShim`).
 
 ### Reference: manual full-mode sweep (what the script automates)
 
@@ -150,4 +159,9 @@ export PATH="/tmp/checkov-shim:/tmp/trivy-bin:$PWD/.venv/Scripts:$PATH"
 
 ## 3. CI is the final gate — not yet exercised
 
-`.github/workflows/secure-review.yml` installs pinned scanners (checkov 3.3.20, bandit 1.9.4, trivy v0.74.0) and runs `secure-review scan "$GITHUB_WORKSPACE" --fail-on high` on every PR to `main`. It has **never executed on a real runner** — blocked on `gh auth login` (GitHub.com → HTTPS → browser) in your own terminal. Once you've authenticated, the sequence is: create the private repo → push → PR → `gh run watch` → drive it green → merge.
+`.github/workflows/secure-review.yml` runs two jobs on every PR to `main`, both using the same full-SHA-pinned actions:
+
+- **`scan` (ubuntu-latest)** — installs pinned scanners (checkov 3.3.20, bandit 1.9.4, trivy v0.74.0) and runs `secure-review scan "$GITHUB_WORKSPACE" --fail-on high`, uploading JSON reports as artifacts.
+- **`e2e-windows` (windows-latest)** — installs `.[test]` + scanners, runs the pytest suite, then `scripts/e2e.ps1` in FULL mode (pip builds a real `checkov.exe` on normal paths; trivy arrives via setup-trivy), proving the exit-code contract and SARIF emission on Windows in CI.
+
+Neither job has ever executed on a real runner — blocked on `gh auth login` (GitHub.com → HTTPS → browser) in your own terminal. Once you've authenticated, the sequence is: create the private repo → push → PR → `gh run watch` → drive both jobs green → merge.
