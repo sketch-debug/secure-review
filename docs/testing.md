@@ -72,7 +72,7 @@ Through the **real console script**, on **real vulnerable and clean trees**:
 | `scan <vulnerable> --fail-on low` | exit **3** |
 | `scan <clean>` (default threshold) | exit **0** |
 | `scan <vulnerable>` when a scanner is missing | exit **1** (reduced mode) or **3** (full mode) |
-| SARIF emission (full mode) | **SARIF-OK n** — every parsed finding re-serialized through the library and asserted field-by-field (version 2.1.0, driver, ruleId, level, verbatim severity/scanner, message, uri, startLine) |
+| SARIF emission (full mode) | **SARIF-OK n** — every parsed finding re-serialized through the library and asserted field-by-field (version 2.1.0, driver, ruleId, level, verbatim severity/scanner, message, uri, startLine); then validated against the **official SARIF 2.1.0 schema** (**SCHEMA-OK**) |
 
 It parses findings from all three real scanners (last full run: **24 findings** from checkov 3.3.20, trivy 0.74.0, bandit 1.9.4) and asserts the exact exit codes. It exits 0 iff no probe failed; skips are allowed.
 
@@ -130,11 +130,12 @@ Probes:
   [ok] exit 0 output mentions expected markers
   [ok] exit 3: default threshold, all scanners installed -> exit 3 (expected 3)
   [ok] SARIF 2.1.0 emission matches parsed findings (SARIF-OK 24)
+  [ok] SARIF log validates against the official 2.1.0 schema (SCHEMA-OK)
 
-e2e summary: 11 passed, 0 failed, 0 skipped
+e2e summary: 12 passed, 0 failed, 0 skipped
 ```
 
-Reduced mode prints `[SKIP]` for the exit-3/exit-0 probes with the reason, and the exit-1 probe becomes the real missing-scanner probe (verified: `6 passed, 0 failed, 1 skipped` with `-SkipShim`).
+Reduced mode prints `[SKIP]` for the exit-3/exit-0 probes with the reason, and the exit-1 probe becomes the real missing-scanner probe (verified: `6 passed, 0 failed, 1 skipped` with `-SkipShim`). Official-schema validation degrades honestly: `SCHEMA-UNAVAILABLE` (no `jsonschema`, or schemastore unreachable) is a skip, never a false failure; only a real `SCHEMA-FAIL` fails the run. (Verified: FULL mode `12 passed, 0 failed, 0 skipped`, `SARIF-OK 24` + `SCHEMA-OK`.) Note `jsonschema` is not a declared dependency of this package — it arrives transitively via checkov, which is why CI (which installs checkov 3.3.20) validates too; anything else skips the schema check but never fakes it.
 
 ### Reference: manual full-mode sweep (what the script automates)
 

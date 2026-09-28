@@ -354,6 +354,29 @@ for res, finding in zip(run["results"], findings):
         if finding.line is not None:
             assert loc["region"]["startLine"] == finding.line
 print("SARIF-OK {0}".format(len(run["results"])))
+
+# Best-effort validation against the OFFICIAL SARIF 2.1.0 schema.
+# Three outcomes: SCHEMA-OK (pass), SCHEMA-UNAVAILABLE (validator
+# missing or schemastore unreachable: skip, never a false failure),
+# SCHEMA-FAIL (real validation error: nonzero exit -> probe fails).
+try:
+    import jsonschema
+    import urllib.request
+    with urllib.request.urlopen(
+        "https://json.schemastore.org/sarif-2.1.0.json", timeout=10
+    ) as fh:
+        schema = json.load(fh)
+except ImportError:
+    print("SCHEMA-UNAVAILABLE jsonschema is not installed")
+except (OSError, ValueError) as exc:
+    print("SCHEMA-UNAVAILABLE {0}".format(exc))
+else:
+    try:
+        jsonschema.validate(log, schema)
+    except jsonschema.exceptions.ValidationError as exc:
+        print("SCHEMA-FAIL {0}".format(exc.message))
+        sys.exit(1)
+    print("SCHEMA-OK")
 '@ | Set-Content -LiteralPath $probe -Encoding ascii
     $sarifOut = @(& $probePy $probe $Target 2>&1)
     $sarifExit = $LASTEXITCODE
@@ -361,6 +384,15 @@ print("SARIF-OK {0}".format(len(run["results"])))
         $Script:PassCount++
         $okLine = ($sarifOut | Where-Object { $_ -match 'SARIF-OK' } | Select-Object -First 1)
         Write-Host ("  [ok] SARIF 2.1.0 emission matches parsed findings ({0})" -f $okLine)
+        $schemaLine = ($sarifOut | Where-Object { $_ -match 'SCHEMA-OK' } | Select-Object -First 1)
+        if ($null -ne $schemaLine) {
+            $Script:PassCount++
+            Write-Host ("  [ok] SARIF log validates against the official 2.1.0 schema ({0})" -f $schemaLine)
+        }
+        $unavail = ($sarifOut | Where-Object { $_ -match 'SCHEMA-UNAVAILABLE' } | Select-Object -First 1)
+        if ($null -ne $unavail) {
+            Write-Skip -Name 'official-schema validation' -Reason ([string]$unavail)
+        }
     } else {
         $Script:FailCount++
         Write-Host ("  [FAIL] SARIF 2.1.0 emission probe (exit {0})" -f $sarifExit)
