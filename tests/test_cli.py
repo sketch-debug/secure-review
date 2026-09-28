@@ -133,6 +133,27 @@ def test_clean_scan_exits_zero_for_every_threshold(tmp_path, capsys, monkeypatch
         assert secure_review.cli.main(["scan", str(tmp_path), "--fail-on", threshold]) == 0, threshold
 
 
+def test_findings_on_nonzero_exit_reach_thresholds(tmp_path, capsys, monkeypatch):
+    """failed WITH an exit code means the scanner ran - threshold territory."""
+    payload = [
+        ScannerResult("Bandit", "failed", 1),
+        ScannerResult("Bandit", "finding", None, Finding("Bandit", "B602", "HIGH", "m", "a.py", 1)),
+    ]
+    monkeypatch.setattr(secure_review.cli, "scan_path", lambda target: payload)
+
+    assert secure_review.cli.main(["scan", str(tmp_path), "--fail-on", "high"]) == 3
+    assert "scan failure" not in capsys.readouterr().out
+
+
+def test_never_executed_failure_is_still_a_tool_error(tmp_path, capsys, monkeypatch):
+    """failed WITHOUT an exit code (OSError-style) is a tool error."""
+    monkeypatch.setattr(
+        secure_review.cli, "scan_path", lambda target: [ScannerResult("Bandit", "failed", None)]
+    )
+
+    assert secure_review.cli.main(["scan", str(tmp_path), "--fail-on", "none"]) == 1
+
+
 def test_scan_failure_is_never_a_threshold_result(tmp_path, capsys, monkeypatch):
     """A missing scanner exits 1 even when --fail-on none and junk findings exist."""
     payload = [

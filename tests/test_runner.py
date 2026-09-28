@@ -101,7 +101,11 @@ def test_findings_differ_from_execution_failures(tmp_path, scanner_env):
 def test_scanners_run_as_argument_list_without_shell(tmp_path, scanner_env):
     runner.scan_path(tmp_path)
 
-    scanner_flags = {"checkov": ["-d"], "trivy": ["config"], "bandit": ["-r"]}
+    scanner_flags = {
+        "checkov": ["--output", "json", "-d"],
+        "trivy": ["config", "--format", "json"],
+        "bandit": ["-f", "json", "-r"],
+    }
     assert [c["cmd"][0] for c in scanner_env.calls] == ["checkov", "trivy", "bandit"]
     for call in scanner_env.calls:
         cmd = call["cmd"]
@@ -121,11 +125,20 @@ BANDIT_JSON = json.dumps(
          "filename": "app/t.py", "line_number": "3"},
     ]}
 )
-CHECKOV_JSON = json.dumps([
-    {"failed_check": [{"check_id": "CKV_AWS_1", "severity": "CRITICAL",
-                       "check_name": "IAM allows *", "file_path": "main.tf",
-                       "file_line_end": 7}]},
-])
+CHECKOV_JSON = json.dumps(
+    {  # empirically pinned against checkov 3.3.20: one dict, results.failed_checks
+        "check_type": "terraform",
+        "results": {
+            "failed_checks": [
+                {"check_id": "CKV_AWS_1", "severity": "CRITICAL", "check_name": "IAM allows *",
+                 "file_path": "\\main.tf", "file_line_range": [1, 7]},
+                {"check_id": "CKV_AWS_2", "severity": None, "check_name": "unpopulated severity",
+                 "file_path": "\\other.tf", "file_line_range": [3, 3]},
+            ]
+        },
+        "summary": {"failed": 2},
+    }
+)
 TRIVY_JSON = json.dumps({"Results": [
     {"Target": "deploy.yaml",
      "Misconfigurations": [{"ID": "AVD-001", "Severity": "MEDIUM",
@@ -152,11 +165,24 @@ def test_parser_shapes_are_pinned(tmp_path, scanner_env):
 
     checkov = by_rule["CKV_AWS_1"]
     assert (checkov.scanner, checkov.severity, checkov.path, checkov.line) == (
-        "Checkov", "CRITICAL", "main.tf", 7)
+        "Checkov", "CRITICAL", "main.tf", 1)  # leading backslash stripped, range start
+    assert by_rule["CKV_AWS_2"].severity == "unknown"  # real 3.3.20 leaves severity None
 
     trivy = by_rule["AVD-001"]
     assert (trivy.scanner, trivy.severity, trivy.path, trivy.line) == (
         "Trivy config", "MEDIUM", "deploy.yaml", 9)
+
+
+def test_nonzero_exit_with_stdout_still_yields_findings(tmp_path, scanner_env):
+    """Real scanners exit nonzero on findings; their stdout still parses."""
+    scanner_env.exit_codes = {"bandit": 1}
+    scanner_env.stdout_by = {"bandit": BANDIT_JSON}
+    results = runner.scan_path(tmp_path)
+
+    bandit = [r for r in results if r.scanner == "Bandit"]
+    assert any(r.status == "failed" and r.exit_code == 1 for r in bandit)
+    findings = [r.finding for r in bandit if r.finding is not None]
+    assert [f.rule_id for f in findings] == ["B602", "B101"]
 
 
 def test_success_with_unparseable_json_is_a_tool_failure(tmp_path, scanner_env):

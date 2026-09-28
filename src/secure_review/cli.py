@@ -9,7 +9,17 @@ from secure_review.runner import ScannerResult, scan_path
 
 USAGE_LINE = "usage: secure-review scan PATH  (runs Checkov, Trivy config, and Bandit)"
 
-TOOL_ERROR_STATUSES = frozenset({"missing", "timeout", "failed"})
+
+def _is_tool_error(result: ScannerResult) -> bool:
+    """Execution problems never ran the scanner (no exit code).
+
+    A nonzero exit WITH a code means the scanner ran and possibly found
+    issues (bandit/checkov exit nonzero on findings) - that is threshold
+    territory, not a tool error.
+    """
+    if result.status in {"missing", "timeout"}:
+        return True
+    return result.status == "failed" and result.exit_code is None
 
 
 def _print_summary_line(result: object) -> None:
@@ -46,7 +56,7 @@ def _run_scan(path: Path, fail_on: str) -> int:
     for result in results:
         _print_summary_line(result)
 
-    if any(isinstance(r, ScannerResult) and r.status in TOOL_ERROR_STATUSES for r in results):
+    if any(isinstance(r, ScannerResult) and _is_tool_error(r) for r in results):
         # Scanner execution problems are distinct from threshold failures:
         # they exit 1 regardless of --fail-on, and no threshold is evaluated.
         print("scan failure: a scanner was missing, timed out, or failed to run")

@@ -60,23 +60,33 @@ def _parse_bandit(raw: str, scanner: str) -> list[Finding]:
 
 
 def _parse_checkov(raw: str, scanner: str) -> list[Finding]:
-    # Checkov JSON: a list of results, one per framework/IaC type, each
-    # with a failed_check list of {check_id, check_name, ...}.
+    # Empirically pinned against checkov 3.3.20: single --output json
+    # emits ONE dict {check_type, results: {failed_checks: [...]},
+    # summary, url}; multiple formats emit a list of such dicts. Items
+    # carry file_line_range [start, end] (file_line_end is None) and
+    # severity is None per item, so it degrades to "unknown".
+    document = json.loads(raw)
+    sections = document if isinstance(document, list) else [document]
     findings = []
-    for section in json.loads(raw):
+    for section in sections:
         if not isinstance(section, dict):
             continue
-        for item in section.get("failed_check", []):
+        results = section.get("results") or {}
+        for item in results.get("failed_checks", []):
             if not isinstance(item, dict):
                 continue
+            line_range = item.get("file_line_range") or []
+            line = next((n for n in line_range if isinstance(n, int)), None)
+            severity = item.get("severity")
+            raw_path = item.get("file_path")
             findings.append(
                 Finding(
                     scanner=scanner,
                     rule_id=str(item.get("check_id", "unknown")),
-                    severity=str(item.get("severity", "unknown")),
+                    severity=str(severity) if severity else "unknown",
                     message=str(item.get("check_name", "")),
-                    path=item.get("file_path"),
-                    line=item.get("file_line_end"),
+                    path=raw_path.lstrip("\\/") if isinstance(raw_path, str) else raw_path,
+                    line=line,
                 )
             )
     return findings
@@ -107,13 +117,15 @@ def _parse_trivy(raw: str, scanner: str) -> list[Finding]:
     return findings
 
 
-# The scanner registry: one spec per scanner, parser attached. Tests pin
-# parser shapes so scanner upgrades that change them fail loudly instead
-# of silently losing findings.
+# The scanner registry: one spec per scanner, parser attached. args
+# MUST include the JSON-report flags (the single run's stdout is the
+# parseable report) positioned so value-taking flags stay adjacent to
+# their values. Tests pin parser shapes so scanner upgrades that change
+# them fail loudly instead of silently losing findings.
 SCANNERS: tuple[ScannerSpec, ...] = (
-    ScannerSpec("Checkov", "checkov", ("-d",), _parse_checkov),
-    ScannerSpec("Trivy config", "trivy", ("config",), _parse_trivy),
-    ScannerSpec("Bandit", "bandit", ("-r",), _parse_bandit),
+    ScannerSpec("Checkov", "checkov", ("--output", "json", "-d"), _parse_checkov),
+    ScannerSpec("Trivy config", "trivy", ("config", "--format", "json"), _parse_trivy),
+    ScannerSpec("Bandit", "bandit", ("-f", "json", "-r"), _parse_bandit),
 )
 
 
@@ -139,7 +151,11 @@ def scan_path(target: Path, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> l
         else:
             status = "success" if completed.returncode == 0 else "failed"
             results.append(ScannerResult(spec.name, status, completed.returncode))
-            if status == "success" and completed.stdout:
+            # Real scanners exit nonzero when they FIND issues (bandit,
+            # checkov), so stdout is parsed for any executed scanner -
+            # findings belong to nonzero exits too. Only execution
+            # failures (timeout/OSError) have no stdout to parse.
+            if completed.stdout:
                 try:
                     parsed = spec.parser(completed.stdout, spec.name)
                 except (json.JSONDecodeError, AttributeError, TypeError):
@@ -149,7 +165,7 @@ def scan_path(target: Path, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> l
                             scanner=spec.name,
                             rule_id="secure-review/missing-parse-output",
                             severity="none",
-                            message="scanner reported success but its JSON output could not be parsed",
+                            message="scanner ran but its JSON output could not be parsed",
                         )
                     ]
                 results.extend(ScannerResult(spec.name, "finding", None, finding) for finding in parsed)
