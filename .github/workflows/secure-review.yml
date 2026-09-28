@@ -1,0 +1,89 @@
+# Runs secure-review scan on pull requests.
+#
+# Security posture:
+# - `pull_request` (never `pull_request_target`): pull-request code runs
+#   with a read-only token and no access to repository secrets.
+# - No workflow-level permissions; the single job gets `contents: read`.
+# - Every third-party action is pinned to a full commit SHA.
+# - Scanners analyze files statically; scanned source is never executed.
+name: secure-review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: secure-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout and tool downloads only; nothing else
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project and scanners (pinned versions)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+          python -m pip install "checkov==3.3.19" "bandit==1.9.4"
+        shell: bash
+
+      # v0.69.4 (March 2026) was compromised; pin a known-good release.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.68.2
+
+      # Exit codes: 0 below threshold, 1 scanner execution problem,
+      # 2 invalid path, 3 findings met or exceeded --fail-on. Any nonzero
+      # exit fails the workflow; the gate lives in the CLI, not here.
+      - name: secure-review scan
+        run: secure-review scan "$GITHUB_WORKSPACE" --fail-on high 2>&1 | tee scan-summary.txt
+        shell: bash
+
+      - name: Generate JSON reports (static analysis only)
+        run: |
+          REPORTS="$RUNNER_TEMP/secure-review-reports"
+          mkdir -p "$REPORTS"
+          # bandit/checkov exit nonzero when they FIND issues - that is a
+          # successful scan, not a tool failure.
+          bandit -r . -f json -o "$REPORTS/bandit.json" || true
+          checkov -d . --output json > "$REPORTS/checkov.json" || true
+          trivy config --format json --output "$REPORTS/trivy.json" . || true
+        shell: bash
+
+      - name: Build Markdown summary
+        if: always()
+        run: |
+          REPORTS="$RUNNER_TEMP/secure-review-reports"
+          {
+            echo "# secure-review scan summary"
+            '```'
+            cat scan-summary.txt
+            '```'
+            echo "JSON reports: bandit.json, checkov.json, trivy.json (workflow artifacts)."
+          } > "$REPORTS/summary.md"
+          cat "$REPORTS/summary.md" >> "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: secure-review-reports-${{ github.event.pull_request.number }}
+          path: ${{ runner.temp }}/secure-review-reports/
+          if-no-files-found: error

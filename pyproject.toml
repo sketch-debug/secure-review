@@ -7,7 +7,7 @@ name = "secure-review"
 dynamic = ["version"]
 description = "CLI for running security scanners over a codebase"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["pydantic>=2.9,<3"]
 
 [project.scripts]
 secure-review = "secure_review.cli:main"

@@ -10,3 +10,4 @@ dist/
 
 # Local tooling state
 .freebuff/
+.pytest_cache/
