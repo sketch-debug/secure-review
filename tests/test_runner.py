@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from pathlib import Path
 from dataclasses import dataclass, field
 
 import pytest
@@ -186,6 +187,26 @@ def test_nonzero_exit_with_stdout_still_yields_findings(tmp_path, scanner_env):
     assert any(r.status == "failed" and r.exit_code == 1 for r in bandit)
     findings = [r.finding for r in bandit if r.finding is not None]
     assert [f.rule_id for f in findings] == ["B602", "B101"]
+
+
+def test_checkov_parser_handles_verbatim_real_payload():
+    """Parse the captured real checkov 3.3.20 output, byte for byte."""
+    fixture = Path(__file__).parent / "fixtures" / "checkov_real.json"
+    raw = fixture.read_text(encoding="utf-8")
+
+    # provenance: the fixture must be what checkov itself wrote
+    document = json.loads(raw)
+    assert document["summary"]["checkov_version"] == "3.3.20"
+
+    findings = runner._parse_checkov(raw, "Checkov")
+    by_rule = {f.rule_id: f for f in findings}
+
+    assert set(by_rule) == {"CKV_AWS_3", "CKV_AWS_189"}
+    aws3 = by_rule["CKV_AWS_3"]
+    assert aws3.severity == "unknown"  # real 3.3.20 leaves item severity None
+    assert aws3.message.startswith("Ensure all data stored in the EBS is securely encrypted")
+    assert aws3.path == "main.tf"  # leading backslash stripped
+    assert aws3.line == 1
 
 
 def test_success_with_unparseable_json_is_a_tool_failure(tmp_path, scanner_env):

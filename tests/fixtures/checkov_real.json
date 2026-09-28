@@ -1,0 +1,201 @@
+{
+    "check_type": "terraform",
+    "results": {
+        "passed_checks": [
+            {
+                "check_id": "CKV2_AWS_2",
+                "bc_check_id": "BC_AWS_GENERAL_60",
+                "check_name": "Ensure that only encrypted EBS volumes are attached to EC2 instances",
+                "check_result": {
+                    "result": "PASSED",
+                    "entity": {
+                        "aws_ebs_volume": {
+                            "bad": {
+                                "__end_line__": 4,
+                                "__start_line__": 1,
+                                "availability_zone": [
+                                    "us-east-1a"
+                                ],
+                                "size": [
+                                    8
+                                ],
+                                "__address__": "aws_ebs_volume.bad"
+                            }
+                        }
+                    },
+                    "evaluated_keys": [
+                        "encrypted",
+                        "resource_type"
+                    ]
+                },
+                "code_block": [
+                    [
+                        1,
+                        "resource \"aws_ebs_volume\" \"bad\" {\n"
+                    ],
+                    [
+                        2,
+                        "  availability_zone = \"us-east-1a\"\n"
+                    ],
+                    [
+                        3,
+                        "  size              = 8\n"
+                    ],
+                    [
+                        4,
+                        "}\n"
+                    ]
+                ],
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf",
+                "repo_file_path": "/AppData/Local/Temp/sr-iac/main.tf",
+                "file_line_range": [
+                    1,
+                    4
+                ],
+                "resource": "aws_ebs_volume.bad",
+                "evaluations": null,
+                "check_class": "checkov.common.graph.checks_infra.base_check",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-only-encrypted-ebs-volumes-are-attached-to-ec2-instances",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf"
+            }
+        ],
+        "failed_checks": [
+            {
+                "check_id": "CKV_AWS_3",
+                "bc_check_id": "BC_AWS_GENERAL_3",
+                "check_name": "Ensure all data stored in the EBS is securely encrypted",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "encrypted"
+                    ]
+                },
+                "code_block": [
+                    [
+                        1,
+                        "resource \"aws_ebs_volume\" \"bad\" {\n"
+                    ],
+                    [
+                        2,
+                        "  availability_zone = \"us-east-1a\"\n"
+                    ],
+                    [
+                        3,
+                        "  size              = 8\n"
+                    ],
+                    [
+                        4,
+                        "}\n"
+                    ]
+                ],
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf",
+                "repo_file_path": "/AppData/Local/Temp/sr-iac/main.tf",
+                "file_line_range": [
+                    1,
+                    4
+                ],
+                "resource": "aws_ebs_volume.bad",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.EBSEncryption",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/general-3-encrypt-ebs-volume",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf"
+            },
+            {
+                "check_id": "CKV_AWS_189",
+                "bc_check_id": "BC_AWS_GENERAL_109",
+                "check_name": "Ensure EBS Volume is encrypted by KMS using a customer managed Key (CMK)",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "kms_key_id"
+                    ]
+                },
+                "code_block": [
+                    [
+                        1,
+                        "resource \"aws_ebs_volume\" \"bad\" {\n"
+                    ],
+                    [
+                        2,
+                        "  availability_zone = \"us-east-1a\"\n"
+                    ],
+                    [
+                        3,
+                        "  size              = 8\n"
+                    ],
+                    [
+                        4,
+                        "}\n"
+                    ]
+                ],
+                "file_path": "\\main.tf",
+                "file_abs_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf",
+                "repo_file_path": "/AppData/Local/Temp/sr-iac/main.tf",
+                "file_line_range": [
+                    1,
+                    4
+                ],
+                "resource": "aws_ebs_volume.bad",
+                "evaluations": null,
+                "check_class": "checkov.terraform.checks.resource.aws.EBSVolumeEncryptedWithCMK",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/bc-aws-general-109",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf"
+            }
+        ],
+        "skipped_checks": [],
+        "parsing_errors": []
+    },
+    "summary": {
+        "passed": 1,
+        "failed": 2,
+        "skipped": 0,
+        "parsing_errors": 0,
+        "resource_count": 1,
+        "checkov_version": "3.3.20"
+    },
+    "url": "Add an api key '--bc-api-key <api-key>' to see more detailed insights via https://bridgecrew.cloud"
+}
