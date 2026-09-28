@@ -139,12 +139,15 @@ CHECKOV_JSON = json.dumps(
         "summary": {"failed": 2},
     }
 )
-TRIVY_JSON = json.dumps({"Results": [
-    {"Target": "deploy.yaml",
-     "Misconfigurations": [{"ID": "AVD-001", "Severity": "MEDIUM",
-                            "Title": "privileged",
-                            "CauseMetadata": {"StartLine": 9}}]},
-]})
+TRIVY_JSON = json.dumps({  # empirically pinned against trivy 0.74.0 config mode
+    "Results": [
+        {"Target": ".", "Misconfigurations": []},  # summary section carries no items
+        {"Target": "main.tf",
+         "Misconfigurations": [{"ID": "AWS-0026", "Severity": "HIGH",
+                                "Title": "EBS volumes must be encrypted",
+                                "CauseMetadata": {"StartLine": 1, "EndLine": 4}}]},
+    ]
+})
 
 
 def test_parser_shapes_are_pinned(tmp_path, scanner_env):
@@ -168,9 +171,9 @@ def test_parser_shapes_are_pinned(tmp_path, scanner_env):
         "Checkov", "CRITICAL", "main.tf", 1)  # leading backslash stripped, range start
     assert by_rule["CKV_AWS_2"].severity == "unknown"  # real 3.3.20 leaves severity None
 
-    trivy = by_rule["AVD-001"]
+    trivy = by_rule["AWS-0026"]
     assert (trivy.scanner, trivy.severity, trivy.path, trivy.line) == (
-        "Trivy config", "MEDIUM", "deploy.yaml", 9)
+        "Trivy config", "HIGH", "main.tf", 1)
 
 
 def test_nonzero_exit_with_stdout_still_yields_findings(tmp_path, scanner_env):

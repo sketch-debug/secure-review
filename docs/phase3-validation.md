@@ -40,8 +40,11 @@ trailing comment:
 | `aquasecurity/setup-trivy` | v0.3.1 (README-documented SHA) |
 | `actions/upload-artifact` | v7.0.1 |
 
-The Trivy **binary** is separately pinned to `v0.68.2` — chosen because the
-March 2026 trivy-action compromise shipped via a malicious `v0.69.4` release.
+The Trivy **binary** is separately pinned to `v0.74.0` — chosen because the
+March 2026 trivy-action compromise shipped via a malicious `v0.69.4` release,
+and because an earlier README-example pin (`v0.68.2`) turned out not to exist
+as a release; v0.74.0 is the version the config-mode JSON parser was
+empirically validated against.
 
 REQUIRES GITHUB: Dependabot alerts or a pinning bot may flag the setup-trivy
 SHA as newer releases land; re-verify the SHA still points at v0.3.1.

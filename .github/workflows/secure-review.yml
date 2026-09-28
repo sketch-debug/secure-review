@@ -43,10 +43,12 @@ jobs:
         shell: bash
 
       # v0.69.4 (March 2026) was compromised; pin a known-good release.
+      # v0.74.0: verified against the empirical parser capture (a README
+      # example version, v0.68.2, turned out not to exist as a release).
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.68.2
+          version: v0.74.0
 
       # Exit codes: 0 below threshold, 1 scanner execution problem,
       # 2 invalid path, 3 findings met or exceeded --fail-on. Any nonzero
