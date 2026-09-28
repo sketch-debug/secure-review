@@ -23,6 +23,18 @@ PowerShell:
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
+### One command from anywhere
+
+`run-tests.ps1` at the repo root works from **any** directory — no `cd`, no activation, no policy concerns. It anchors on its own location, uses the venv python when present (falling back to `python` on PATH, the CI layout), gives pytest a PID-suffixed basetemp under `%TEMP%` (sidesteps the poisoned `pytest-of-jeffr` factory, allows parallel runs), disables the cache provider so the tree stays pristine, forwards extra arguments verbatim, and exits with pytest's exit code.
+
+```powershell
+& "C:\Users\jeffr\jeff's Projects\SecureReview Agent\run-tests.ps1"        # full suite
+& "C:\Users\jeffr\jeff's Projects\SecureReview Agent\run-tests.ps1" -k threshold
+& "C:\Users\jeffr\jeff's Projects\SecureReview Agent\run-tests.ps1" tests\test_cli.py -x
+```
+
+On a green run its scratch dir is removed; on a red one the path is printed and the artifacts kept for inspection.
+
 Both expect: `84 passed in ~0.3s`. On this machine, if collection dies with `ModuleNotFoundError: No module named 'secure_review'` / `pydantic`, you are on the global Python — the venv was not activated (or activation merged into a previous line). Use the explicit `.venv/Scripts/python` forms above.
 
 ### Layout
