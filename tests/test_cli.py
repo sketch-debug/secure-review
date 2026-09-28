@@ -1,5 +1,7 @@
 """Smoke tests for the secure-review CLI."""
 
+import json
+
 import pytest
 
 import secure_review.cli
@@ -12,8 +14,19 @@ def test_main_returns_zero(capsys):
     assert "usage: secure-review scan PATH" in capsys.readouterr().out
 
 
-def test_scan_valid_directory(tmp_path, capsys):
-    # No scanners installed here: a tool error (exit 1), not a threshold result.
+def test_scan_valid_directory(tmp_path, capsys, monkeypatch):
+    # Env-independent: patch the runner so this tests the CLI's rendering
+    # and tool-error precedence regardless of installed scanners (CI has
+    # checkov/bandit installed; a bare dev box does not).
+    monkeypatch.setattr(
+        secure_review.cli,
+        "scan_path",
+        lambda target: [
+            ScannerResult("Checkov", "missing", None),
+            ScannerResult("Trivy config", "missing", None),
+            ScannerResult("Bandit", "missing", None),
+        ],
+    )
     assert secure_review.cli.main(["scan", str(tmp_path)]) == 1
     out = capsys.readouterr().out
     assert "Scan started:" in out
@@ -181,3 +194,55 @@ def test_fail_on_rejects_unknown_choice(tmp_path, capsys, monkeypatch):
     with pytest.raises(SystemExit) as excinfo:
         secure_review.cli.main(["scan", str(tmp_path), "--fail-on", "apocalyptic"])
     assert excinfo.value.code == 2
+
+
+# --- --sarif output ----------------------------------------------------------
+
+
+def test_sarif_flag_writes_valid_log(tmp_path, capsys, monkeypatch):
+    _scan_with_findings(tmp_path, capsys, monkeypatch, ["HIGH"])
+    report = tmp_path / "out" / "report.sarif"  # parent dirs are created
+    exit_code = secure_review.cli.main(
+        ["scan", str(tmp_path), "--sarif", str(report), "--fail-on", "high"]
+    )
+    assert exit_code == 3
+    data = json.loads(report.read_text(encoding="utf-8"))
+    assert data["version"] == "2.1.0"
+    results = data["runs"][0]["results"]
+    assert len(results) == 1
+    assert results[0]["ruleId"] == "B1"
+    assert results[0]["properties"]["severity"] == "HIGH"
+
+
+def test_sarif_written_on_clean_scan(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        secure_review.cli, "scan_path", lambda target: [ScannerResult("Bandit", "success", 0)]
+    )
+    report = tmp_path / "report.sarif"
+    assert secure_review.cli.main(["scan", str(tmp_path), "--sarif", str(report)]) == 0
+    data = json.loads(report.read_text(encoding="utf-8"))
+    assert data["runs"][0]["results"] == []
+
+
+def test_sarif_not_written_on_invalid_path(tmp_path, capsys):
+    report = tmp_path / "never.sarif"
+    assert secure_review.cli.main(["scan", str(tmp_path / "nope"), "--sarif", str(report)]) == 2
+    assert not report.exists()
+
+
+def test_sarif_written_on_tool_error(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        secure_review.cli, "scan_path", lambda target: [ScannerResult("Bandit", "timeout", None)]
+    )
+    report = tmp_path / "partial.sarif"
+    assert secure_review.cli.main(["scan", str(tmp_path), "--sarif", str(report)]) == 1
+    data = json.loads(report.read_text(encoding="utf-8"))
+    assert data["runs"][0]["results"] == []
+
+
+def test_sarif_write_failure_warns_and_scan_continues(tmp_path, capsys, monkeypatch):
+    _scan_with_findings(tmp_path, capsys, monkeypatch, ["LOW"])
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()  # a directory: write_text fails with IsADirectoryError
+    assert secure_review.cli.main(["scan", str(tmp_path), "--sarif", str(blocked)]) == 3
+    assert "warning: could not write SARIF" in capsys.readouterr().out
