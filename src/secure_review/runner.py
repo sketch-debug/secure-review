@@ -150,8 +150,11 @@ def _parse_trivy(raw: str, scanner: str) -> list[Finding]:
 # The scanner registry: one spec per scanner, parser attached. args
 # MUST include the JSON-report flags (the single run's stdout is the
 # parseable report) positioned so value-taking flags stay adjacent to
-# their values. Tests pin parser shapes so scanner upgrades that change
-# them fail loudly instead of silently losing findings.
+# their values. The scan target is appended directly after args (so a
+# trailing value-taking flag such as checkov's -d receives it), and the
+# exclude flags are appended after the target. Tests pin parser shapes
+# so scanner upgrades that change them fail loudly instead of silently
+# losing findings.
 SCANNERS: tuple[ScannerSpec, ...] = (
     ScannerSpec(
         "Checkov", "checkov", ("--output", "json", "-d"), _parse_checkov,
@@ -176,13 +179,19 @@ def scan_path(target: Path, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> l
         if shutil.which(spec.binary) is None:
             results.append(ScannerResult(spec.name, "missing", None))
             continue
-        args = spec.args
+        args = (*spec.args, target_str)
         if spec.exclude is not None:
+            # Exclude flags go AFTER the positional target, never between
+            # args and it: checkov 3.3.20's -d is value-taking, and
+            # "--skip-path" directly after "-d" makes argparse die with
+            # "argument -d/--directory: expected one argument" (rc 2, no
+            # stdout), so checkov findings silently vanish. Empirically
+            # pinned on all three scanners at their pinned versions.
             flag, format_value = spec.exclude
             args = (*args, flag, format_value(DEFAULT_SCAN_EXCLUDES))
         try:
             completed = subprocess.run(
-                [spec.binary, *args, target_str],
+                [spec.binary, *args],
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,

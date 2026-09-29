@@ -118,11 +118,14 @@ def test_scanners_run_as_argument_list_without_shell(tmp_path, scanner_env):
 
     # Flag shapes empirically pinned on the pinned versions: checkov
     # --skip-path and trivy --skip-dirs take a bare comma-joined list;
-    # bandit -x takes glob patterns (bare dir names are ignored).
+    # bandit -x takes glob patterns (bare dir names are ignored). The
+    # target always comes BEFORE the exclude pair: checkov's value-taking
+    # -d must receive the target, not "--skip-path" (that ordering made
+    # argparse error out and silently zeroed every checkov finding).
     scanner_flags = {
-        "checkov": ["--output", "json", "-d", "--skip-path", ".venv,node_modules"],
-        "trivy": ["config", "--format", "json", "--skip-dirs", ".venv,node_modules"],
-        "bandit": ["-f", "json", "-r", "-x", "*/.venv/*,*/node_modules/*"],
+        "checkov": ["--output", "json", "-d", str(tmp_path), "--skip-path", ".venv,node_modules"],
+        "trivy": ["config", "--format", "json", str(tmp_path), "--skip-dirs", ".venv,node_modules"],
+        "bandit": ["-f", "json", "-r", str(tmp_path), "-x", "*/.venv/*,*/node_modules/*"],
     }
     assert [c["cmd"][0] for c in scanner_env.calls] == ["checkov", "trivy", "bandit"]
     for call in scanner_env.calls:
@@ -131,8 +134,21 @@ def test_scanners_run_as_argument_list_without_shell(tmp_path, scanner_env):
         assert not call.get("shell", False), "must not run through the shell"
         assert call["capture_output"] is True
         assert call["text"] is True
-        assert cmd[1:-1] == scanner_flags[cmd[0]]
-        assert cmd[-1] == str(tmp_path)
+        assert cmd[1:] == scanner_flags[cmd[0]]
+
+
+def test_exclude_flags_come_after_the_target(tmp_path, scanner_env):
+    """Regression: the scan target precedes every exclude flag. The old
+    assembly put the exclude pair directly after checkov's value-taking -d,
+    so argparse died with "argument -d/--directory: expected one argument"
+    (rc 2, empty stdout) and every checkov finding silently vanished while
+    trivy/bandit still produced HIGHs and the exit contract stayed green."""
+    runner.scan_path(tmp_path)
+    for call in scanner_env.calls:
+        cmd = call["cmd"]
+        assert cmd.index(str(tmp_path)) < len(cmd) - 1, (
+            f"{cmd[0]}: exclude flags must come after the target"
+        )
 
 
 BANDIT_JSON = json.dumps(
