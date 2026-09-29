@@ -136,8 +136,10 @@ jobs:
           if-no-files-found: error
 
   # Proves the exit-code contract and SARIF emission on Windows runners,
-  # via scripts/e2e.ps1 (FULL mode: pip-built checkov.exe works on normal
-  # paths; trivy found on PATH from setup-trivy). Same pinned actions.
+  # via scripts/e2e.ps1 (FULL mode: sysconfig detection + the csc shim make
+  # checkov runnable even where pip only emits a .cmd wrapper, and trivy is
+  # unpacked into %TEMP%\trivy-bin where the script auto-detects it -
+  # setup-trivy's PATH edit does not reach the pwsh step). Same pinned actions.
   e2e-windows:
     runs-on: windows-latest
     permissions:
@@ -169,6 +171,20 @@ jobs:
       - name: Run test suite
         run: python -m pytest -q
         shell: bash
+
+      # setup-trivy's PATH edit does not reach the pwsh step on Windows
+      # runners (first e2e run: REDUCED, trivy present: False), so put the
+      # pinned binary where scripts/e2e.ps1 auto-detects it.
+      - name: Install Trivy for e2e (checksum-verified)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:RUNNER_TEMP 'trivy-bin'
+          New-Item -ItemType Directory -Path $bin -Force | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_windows-64bit.zip' -OutFile "$env:RUNNER_TEMP\trivy.zip"
+          $hash = (Get-FileHash "$env:RUNNER_TEMP\trivy.zip" -Algorithm SHA256).Hash
+          if ($hash -ne '94c40e0696e4b907a74b7b2e1438d5d72ebaca83115817407f568a002d520842') { exit 1 }
+          Expand-Archive -Path "$env:RUNNER_TEMP\trivy.zip" -DestinationPath $bin -Force
+        shell: pwsh
 
       - name: Run e2e contract probes
         run: scripts\e2e.ps1

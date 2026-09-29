@@ -182,7 +182,7 @@ export PATH="/tmp/checkov-shim:/tmp/trivy-bin:$PWD/.venv/Scripts:$PATH"
 `.github/workflows/secure-review.yml` runs two jobs on every PR to `main`, both using the same full-SHA-pinned actions:
 
 - **`scan` (ubuntu-latest)** — installs pinned scanners (checkov 3.3.20, bandit 1.9.4, trivy v0.74.0) and runs `secure-review scan "$GITHUB_WORKSPACE" --fail-on high --sarif "$RUNNER_TEMP/secure-review.sarif"`; JSON + SARIF reports and a Markdown step summary are uploaded as artifacts under `if: always()`, so a red gate still ships its evidence.
-- **`e2e-windows` (windows-latest)** — installs `.[test]` + scanners, runs the pytest suite, then `scripts/e2e.ps1` in FULL mode (pip builds a real `checkov.exe` on normal paths; trivy arrives via setup-trivy), proving the exit-code contract and SARIF emission on Windows in CI.
+- **`e2e-windows` (windows-latest)** — installs `.[test]` + scanners, runs the pytest suite, then `scripts/e2e.ps1` in FULL mode (sysconfig detection + the csc shim make checkov runnable even where pip only emits a `.cmd` wrapper; trivy is unpacked checksum-verified into `%TEMP%\trivy-bin`, which the script auto-detects — setup-trivy's PATH edit does not reach the pwsh step on Windows runners), proving the exit-code contract and SARIF emission on Windows in CI.
 
 The first real run (2026-09-28, run 36423902300) failed **both** jobs. Three independent defects, none of them scanner-related — postmortem:
 

@@ -317,6 +317,11 @@ $code = Invoke-SecureReview -ArgLine "scan $Script:Tmp\does-not-exist --fail-on 
 Write-Case -Name 'exit 2: path does not exist' -Expected 2 -Actual $code
 Assert-OutputContains -Name 'exit 2' -Needles @('error: path does not exist') -Lines $out.Value
 
+# Create the probe target explicitly: locally the console-script path
+# happens to leave out.txt behind as its own redirect target, but the
+# module fallback (CI) never creates it - scanning a nonexistent path is
+# a valid exit 2, but with the OTHER error marker, failing this probe.
+Set-Content -LiteralPath "$Script:Tmp\out.txt" -Value '' -Encoding ascii
 $code = Invoke-SecureReview -ArgLine "scan $Script:Tmp\out.txt --fail-on none" -Out $out
 Write-Case -Name 'exit 2: path is a file, not a directory' -Expected 2 -Actual $code
 Assert-OutputContains -Name 'exit 2 (file)' -Needles @('error: not a directory') -Lines $out.Value
