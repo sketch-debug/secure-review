@@ -219,3 +219,9 @@ Verified live during adoption: the gate flagged a parse-level problem in a `run:
 **Honest limit, verified by probe:** re-creating the original `'```'` fence in a scratch workflow, actionlint exits **0** — the construct is valid bash that only fails at runtime (exit 127), so no static shellcheck catches it. The gate reliably eliminates the parse-error and classic quoting/expansion classes (SC2086 and friends); the runtime-only class still needs the 3.1 rules: emit fences with `printf`, and smoke-test nontrivial `run:` blocks locally (`bash -n` catches parse errors, a scratch run catches the rest).
 
 Local usage: download the Windows build of actionlint once, then `actionlint -no-color .github/workflows/secure-review.yml` after any workflow edit — it invokes shellcheck from `PATH` automatically when present.
+
+### 3.5 Code scanning upload: pinned, shipped, and blocked by licensing
+
+The scan job ends with `github/codeql-action/upload-sarif` (v4, pinned to a full commit SHA resolved through the annotated tag) uploading the SARIF that `secure-review scan` just wrote **to a path relative to the repo root** — the action rejects absolute paths. The job gained `security-events: write`, and the step runs `if: always()` after the artifact upload so the reports are already safe.
+
+Empirical outcome on this private repo (run 36522916358): the action downloaded and **validated** the SARIF, then failed with `Resource not accessible by integration` — GitHub rejects SARIF uploads from repos without Advanced Security (code scanning is free on public repos only; the `code-scanning/default-setup` and alerts APIs both 403 here). The step therefore carries `continue-on-error: true`: the limitation stays visible in the step status without failing a green PR. Two ways to light up the Security tab: make the repo public (the upload starts working as-is), or add Advanced Security. Remove `continue-on-error` once either happens.
