@@ -74,6 +74,7 @@ Subsets:
 - **Git Bash mangles `/flags` into paths** when invoking native .exe tools → use `MSYS2_ARG_CONV_EXCL='*'` when invoking `csc.exe` or trivy with `/`-style flags directly.
 - **Store stub `python3`** exists but is not the venv; always `python` or the explicit `.venv/Scripts/python`.
 - **pytest tmp factory poisoned?** A crashed session left `C:\Users\jeffr\AppData\Local\Temp\pytest-of-jeffr` with damaged ACLs that even admin PowerShell could not remove. Handled at the root since the conftest pin: `conftest.py` sets `%TEMP%\sr-pytest-<pid>` as basetemp unless `--basetemp` is passed explicitly, so bare `pytest` never touches the poisoned tree (`run-tests.ps1` predates this and passes its own flag, which wins).
+- **Scanning the repo root is safe now.** All scanners skip `.venv` and `node_modules` by default (`DEFAULT_SCAN_EXCLUDES` in the runner; each scanner gets its own skip flag/value shape, empirically pinned on the pinned versions: checkov `--skip-path` and trivy `--skip-dirs` take a bare comma list, bandit `-x` takes glob patterns — bare dir names are silently ignored there). Before this, `scan .` was a guaranteed `Bandit: timeout` from recursing the whole virtualenv; now it completes in seconds.
 
 ---
 

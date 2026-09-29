@@ -48,6 +48,20 @@ def test_missing_binary_is_reported_without_running(tmp_path, monkeypatch):
     ]
 
 
+def test_default_scan_excludes_constant_is_pinned():
+    assert runner.DEFAULT_SCAN_EXCLUDES == (".venv", "node_modules")
+
+
+def test_spec_without_exclude_omits_the_flags(tmp_path, scanner_env, monkeypatch):
+    """exclude=None (the dataclass default) must add no skip flags."""
+    bare = runner.ScannerSpec("Bare", "fake", ("-q",), runner._parse_bandit)
+    monkeypatch.setattr(runner, "SCANNERS", (bare,))
+    results = runner.scan_path(tmp_path)
+
+    assert [c["cmd"] for c in scanner_env.calls] == [["fake", "-q", str(tmp_path)]]
+    assert [r.scanner for r in results] == ["Bare"]
+
+
 def test_success_and_failure_exit_codes(tmp_path, scanner_env):
     scanner_env.exit_codes = {"checkov": 0, "trivy": 3, "bandit": 3}
     results = runner.scan_path(tmp_path)
@@ -102,10 +116,13 @@ def test_findings_differ_from_execution_failures(tmp_path, scanner_env):
 def test_scanners_run_as_argument_list_without_shell(tmp_path, scanner_env):
     runner.scan_path(tmp_path)
 
+    # Flag shapes empirically pinned on the pinned versions: checkov
+    # --skip-path and trivy --skip-dirs take a bare comma-joined list;
+    # bandit -x takes glob patterns (bare dir names are ignored).
     scanner_flags = {
-        "checkov": ["--output", "json", "-d"],
-        "trivy": ["config", "--format", "json"],
-        "bandit": ["-f", "json", "-r"],
+        "checkov": ["--output", "json", "-d", "--skip-path", ".venv,node_modules"],
+        "trivy": ["config", "--format", "json", "--skip-dirs", ".venv,node_modules"],
+        "bandit": ["-f", "json", "-r", "-x", "*/.venv/*,*/node_modules/*"],
     }
     assert [c["cmd"][0] for c in scanner_env.calls] == ["checkov", "trivy", "bandit"]
     for call in scanner_env.calls:
