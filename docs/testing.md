@@ -1,13 +1,14 @@
 # Testing `secure-review`
 
-Two layers, both verified on this machine (Windows 11, Git Bash + PowerShell 5.1, Python 3.13):
+Three layers, all verified on this machine (Windows 11, Git Bash + PowerShell 5.1, Python 3.13):
 
-1. **Unit/integration suite** — 84 tests, no real scanners needed (parser tests run against verbatim real-output fixtures).
+1. **Unit/integration suite** — 95 tests, no real scanners needed (parser tests run against verbatim real-output fixtures).
 2. **Real end-to-end** — `scripts/e2e.ps1` builds throwaway vulnerable and clean trees, drives the real console script with real checkov/trivy/bandit, and asserts the full exit-code contract.
+3. **CI** — every PR runs the suite, a real scan with SARIF upload, and the e2e script on a Windows runner; §4 is the full-system sweep that ties the layers together.
 
 ---
 
-## 1. The 92-test suite
+## 1. The 95-test suite
 
 ### Run it
 
@@ -41,7 +42,7 @@ runs.
 
 On a green run its scratch dir is removed; on a red one the path is printed and the artifacts kept for inspection.
 
-Both expect: `92 passed` in well under a second. On this machine, if collection dies with `ModuleNotFoundError: No module named 'secure_review'` / `pydantic`, you are on the global Python — the venv was not activated (or activation merged into a previous line). Use the explicit `.venv/Scripts/python` forms above.
+Both expect: `95 passed` in about a second. On this machine, if collection dies with `ModuleNotFoundError: No module named 'secure_review'` / `pydantic`, you are on the global Python — the venv was not activated (or activation merged into a previous line). Use the explicit `.venv/Scripts/python` forms above.
 
 ### Layout
 
@@ -49,7 +50,7 @@ Both expect: `92 passed` in well under a second. On this machine, if collection 
 |---|---|---|
 | `tests/test_ai_advisor.py` | 43 | opt-in advisor: inert without `opt_in=True`, field allowlist, safe degradation to `None`, never wired into the CLI |
 | `tests/test_cli.py` | 27 | exit contract (0/1/2/3), threshold ranking (`unknown` = worst), missing-scanner exit 1 that never masquerades as a threshold result, `--sarif` emission |
-| `tests/test_runner.py` | 13 | parser shapes for all three scanners against **verbatim real-output fixtures** |
+| `tests/test_runner.py` | 16 | parser shapes for all three scanners against **verbatim real-output fixtures**; exclude-flag shapes (`--skip-path`/`--skip-dirs` comma lists, bandit `-x` globs) and the target-before-excludes argv order |
 | `tests/test_sarif.py` | 5 | SARIF 2.1.0 structure, `properties.severity` verbatim |
 | `tests/test_package.py` | 1 | dynamic version + import smoke |
 | `tests/test_conftest.py` | 3 | basetemp pin contract: explicit `--basetemp` wins, the default redirects to `sr-pytest-<pid>`, a nested bare session adds no `pytest-of-*` dir |
@@ -74,7 +75,7 @@ Subsets:
 - **Git Bash mangles `/flags` into paths** when invoking native .exe tools → use `MSYS2_ARG_CONV_EXCL='*'` when invoking `csc.exe` or trivy with `/`-style flags directly.
 - **Store stub `python3`** exists but is not the venv; always `python` or the explicit `.venv/Scripts/python`.
 - **pytest tmp factory poisoned?** A crashed session left `C:\Users\jeffr\AppData\Local\Temp\pytest-of-jeffr` with damaged ACLs that even admin PowerShell could not remove. Handled at the root since the conftest pin: `conftest.py` sets `%TEMP%\sr-pytest-<pid>` as basetemp unless `--basetemp` is passed explicitly, so bare `pytest` never touches the poisoned tree (`run-tests.ps1` predates this and passes its own flag, which wins).
-- **Scanning the repo root is safe now.** All scanners skip `.venv` and `node_modules` by default (`DEFAULT_SCAN_EXCLUDES` in the runner; each scanner gets its own skip flag/value shape, empirically pinned on the pinned versions: checkov `--skip-path` and trivy `--skip-dirs` take a bare comma list, bandit `-x` takes glob patterns — bare dir names are silently ignored there). Before this, `scan .` was a guaranteed `Bandit: timeout` from recursing the whole virtualenv; now it completes in seconds.
+- **Scanning the repo root is safe now.** All scanners skip `.venv` and `node_modules` by default (`DEFAULT_SCAN_EXCLUDES` in the runner; each scanner gets its own skip flag/value shape, empirically pinned on the pinned versions: checkov `--skip-path` and trivy `--skip-dirs` take a bare comma list, bandit `-x` takes glob patterns — bare dir names are silently ignored there). Before this, `scan .` was a guaranteed `Bandit: timeout` from recursing the whole virtualenv; now it completes in seconds. One assembly rule lives with this feature: the scan target goes **before** the exclude flags. The first cut put the pair straight after checkov's value-taking `-d`, argparse died with `argument -d/--directory: expected one argument` (rc 2, empty stdout) and **every checkov finding silently vanished** while trivy/bandit kept the exit contract green — CI could not see it. It surfaced only because the local e2e run prints its finding count (`SARIF-OK 24 → 14`), and was proven by A/B-ing the runner with the exclude spec stripped. `test_exclude_flags_come_after_the_target` now pins the rule; lesson: any change to scanner argv must be diffed against the scanner's own argparse, not just asserted against the argv list.
 
 ---
 
@@ -226,3 +227,58 @@ Local usage: download the Windows build of actionlint once, then `actionlint -no
 The scan job ends with `github/codeql-action/upload-sarif` (v4, pinned to a full commit SHA resolved through the annotated tag) uploading the SARIF that `secure-review scan` just wrote **to a path relative to the repo root** — the action rejects absolute paths. The job gained `security-events: write`, and the step runs `if: always()` after the artifact upload so the reports are already safe.
 
 Empirical outcome on this private repo (run 36522916358): the action downloaded and **validated** the SARIF, then failed with `Resource not accessible by integration` — GitHub rejects SARIF uploads from repos without Advanced Security (code scanning is free on public repos only; the `code-scanning/default-setup` and alerts APIs both 403 here). The step therefore carries `continue-on-error: true`: the limitation stays visible in the step status without failing a green PR. Two ways to light up the Security tab: make the repo public (the upload starts working as-is), or add Advanced Security. Remove `continue-on-error` once either happens.
+
+---
+
+## 4. Testing the whole system: the five-layer sweep
+
+Ordered cheapest to most expensive. Each layer catches a class the previous one cannot, and the checkov-arg-order bug above is the worked example: the suite was green, CI was green, only layer 4's finding-count canary showed anything at all.
+
+**Layer 0 — contracts (seconds, after every change to `src/`).** The unit suite pins everything cheap to pin: parser shapes against verbatim real scanner output, the exit contract, SARIF structure, argv assembly, fixture provenance.
+
+```bash
+.venv/Scripts/python -m pytest -q          # expect: 95 passed
+# or, from any directory:  & "C:\Users\jeffr\jeff's Projects\SecureReview Agent\run-tests.ps1"
+```
+
+**Layer 1 — exit contract against real scanners (a minute, before pushing).** The e2e script automates this; the manual sweep behind it is (Git Bash, with the PATH prefix that makes checkov/trivy resolvable locally):
+
+```bash
+export PATH="/c/Users/jeffr/AppData/Local/Temp/trivy-bin:$PWD/.venv/Scripts:$PATH"
+SR=.venv/Scripts/secure-review.exe
+$SR scan <vulnerable-fixture> --fail-on high; echo exit=$?   # 3 (threshold met)
+$SR scan <clean-fixture>;                    echo exit=$?    # 0 (below threshold)
+$SR scan /nonexistent/path;                  echo exit=$?    # 2 (invalid path)
+# exit 1 (scanner execution problem): hide a binary from PATH and rescan,
+# or scan with a target that times a scanner out
+```
+
+The full contract lives in the CLI help and `tests/test_cli.py`; e2e asserts the same four exits plus output markers (§2).
+
+**Layer 2 — SARIF emission (one command).** `--sarif` writes the report *before* threshold evaluation, so even an exit-3 scan leaves a file:
+
+```bash
+$SR scan <vulnerable-fixture> --sarif out.sarif && python -c "import json; d=json.load(open('out.sarif')); print(d['version'], len(d['runs'][0]['results']))"   # 2.1.0 <finding count>
+```
+
+e2e goes further and validates the file against the official 2.1.0 JSON schema (`SCHEMA-OK`).
+
+**Layer 3 — real scanners on a real tree (seconds).** Scanning this repo's own root is now the cheapest realistic workload: all three pinned scanners run against a tree containing a real `.venv` (previously a guaranteed bandit timeout):
+
+```bash
+$SR scan . ; echo exit=$?    # locally exit 1 (checkov's pip .cmd cannot launch — §1 quirk); exit 0 in CI
+```
+
+On CI this is the `scan` job itself, which additionally uploads artifacts and (licensing permitting, §3.5) the SARIF to code scanning.
+
+**Layer 4 — the full e2e harness (about 2 minutes, before pushing).**
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\e2e.ps1
+```
+
+Expect `12 passed, 0 failed, 0 skipped`, `SARIF-OK 24` + `SCHEMA-OK`. **Treat `SARIF-OK <n>` as a canary:** it is the only signal in the whole chain that counts parsed findings. It dropped 24 → 14 when the arg-order bug zeroed checkov, with every pass/fail probe still green. A drop without a deliberate scanner-upgrade reason means findings are being lost — stop and investigate.
+
+**Layer 5 — CI (the clean-machine proof).** Push, then watch: `gh pr checks <N> --watch`. Green here means the suite, a real scan with SARIF upload, and the full e2e harness all passed on machines that share nothing with this one.
+
+**Decision rule:** layers 0+3 after any code change, layer 4 before every push, layer 5 on every PR. Layer 1/2 by hand only when debugging a specific exit or report.
