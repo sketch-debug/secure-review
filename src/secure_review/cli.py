@@ -6,6 +6,7 @@ from pathlib import Path
 from secure_review import __version__
 from secure_review.findings import SEVERITY_ORDER, severity_rank
 from secure_review.runner import ScannerResult, scan_path
+from secure_review.sarif import to_json
 
 USAGE_LINE = "usage: secure-review scan PATH  (runs Checkov, Trivy config, and Bandit)"
 
@@ -36,7 +37,18 @@ def _print_summary_line(result: object) -> None:
     print(line)
 
 
-def _run_scan(path: Path, fail_on: str) -> int:
+def _write_sarif(sarif_path: Path, findings: list) -> bool:
+    """Best effort: a report-write failure warns but never changes the exit."""
+    try:
+        sarif_path.parent.mkdir(parents=True, exist_ok=True)
+        sarif_path.write_text(to_json(findings), encoding="utf-8")
+    except OSError as exc:
+        print(f"warning: could not write SARIF report {sarif_path}: {exc}")
+        return False
+    return True
+
+
+def _run_scan(path: Path, fail_on: str, sarif_path: Path | None = None) -> int:
     if not path.exists():
         print(f"error: path does not exist: {path}")
         return 2
@@ -55,6 +67,13 @@ def _run_scan(path: Path, fail_on: str) -> int:
 
     for result in results:
         _print_summary_line(result)
+
+    # The report is emitted on every outcome that ran scanners (0/1/3) so
+    # CI gets artifacts even from failed gates; exit 2 (invalid path)
+    # never reaches a scan and writes nothing.
+    if sarif_path is not None:
+        findings = [r.finding for r in results if isinstance(r, ScannerResult) and r.finding is not None]
+        _write_sarif(sarif_path, findings)
 
     if any(isinstance(r, ScannerResult) and _is_tool_error(r) for r in results):
         # Scanner execution problems are distinct from threshold failures:
@@ -90,6 +109,12 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser = subparsers.add_parser("scan", help="Run security scanners against a directory.")
     scan_parser.add_argument("path", type=Path, help="Directory to scan.")
     scan_parser.add_argument(
+        "--sarif",
+        type=Path,
+        default=None,
+        help="Write a SARIF 2.1.0 report of the parsed findings to this path.",
+    )
+    scan_parser.add_argument(
         "--fail-on",
         choices=SEVERITY_ORDER,
         default="none",
@@ -101,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.command == "scan":
-        return _run_scan(args.path, args.fail_on)
+        return _run_scan(args.path, args.fail_on, args.sarif)
     print(USAGE_LINE)
     return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - run via `python -m secure_review.cli`
+    raise SystemExit(main())

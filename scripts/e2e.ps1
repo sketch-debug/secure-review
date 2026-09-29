@@ -34,12 +34,21 @@
     Directory containing trivy.exe, prepended to PATH. Auto-detected from
     %TEMP%\trivy-bin when omitted.
 
+.PARAMETER PythonExe
+    Python interpreter used for the `python -m secure_review.cli` fallback
+    and interpreter-relative scanner detection. Defaults to the repo venv
+    interpreter when present, else `python` on PATH (CI installs the
+    package into the setup-python interpreter).
+
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts\e2e.ps1
 #>
 
 param(
     [string]$TrivyDir = '',
+    # Python interpreter for the module fallback and scanner detection
+    # (see .PARAMETER PythonExe). Auto-resolved when omitted.
+    [string]$PythonExe = '',
     # Force REDUCED mode even when the environment could support FULL:
     # skips the csc.exe checkov shim build and the trivy-dependent probes.
     # Useful to prove the reduced path deterministically.
@@ -83,11 +92,11 @@ function Invoke-SecureReview {
         $Out.Value = @(Get-Content -LiteralPath "$Script:Tmp\out.txt")
         return $proc.ExitCode
     }
-    # Fallback: repo venv python when present, else python on PATH
-    # (CI installs the package into the setup-python interpreter).
-    $py = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
-    if (-not (Test-Path -LiteralPath $py)) { $py = 'python' }
-    $Out.Value = @(& $py -m secure_review.cli @argList 2>&1)
+    # Fallback: run the module through a known interpreter (repo venv when
+    # present, else python on PATH - on CI the package is installed into
+    # the setup-python interpreter). Without -m, the fallback would exit 0
+    # having done nothing, so every probe would silently "pass".
+    $Out.Value = @(& $Script:Python -m secure_review.cli @argList 2>&1)
     return $LASTEXITCODE
 }
 
@@ -119,6 +128,14 @@ function Count-Findings {
 
 $ProjectRoot = (Get-Item $PSScriptRoot).Parent.FullName
 
+# Interpreter for the CLI fallback and sysconfig-based scanner detection.
+if ($PythonExe) {
+    $Script:Python = $PythonExe
+} else {
+    $Script:Python = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $Script:Python)) { $Script:Python = 'python' }
+}
+
 # Mimic an activated venv: the runner resolves checkov/bandit via PATH
 # (shutil.which), and a developer runs secure-review from an activated
 # shell. Without this, scanners installed in .venv are invisible and every
@@ -146,25 +163,44 @@ $trivyPresent = $false
 if ($TrivyDir -and (Test-Path -LiteralPath (Join-Path $TrivyDir 'trivy.exe'))) {
     $env:Path = "$TrivyDir;$env:Path"
     $trivyPresent = $true
-} elseif (-not $SkipShim) {
-    # Fall back to a trivy already on PATH (e.g. installed by CI).
+} else {
+    # Fall back to a trivy already on PATH (setup-trivy on CI; -SkipShim
+    # does not disable this - it only skips the checkov shim build).
     $trivyCmd = Get-Command trivy -ErrorAction SilentlyContinue
     if ($null -ne $trivyCmd) { $trivyPresent = $true }
 }
 
-# --- checkov runnability: .cmd wrappers are not executable by the runner --
-# Windows CreateProcess cannot launch .cmd files, and pip could not create
-# checkov.exe on paths with apostrophes (this box). Build a thin shim that
-# execs `python -m checkov.main` so the runner sees a real executable.
-$checkovCmd = Get-Command checkov -ErrorAction SilentlyContinue
+# --- checkov runnability: what matters is a launchable executable ---------
+# The runner (and any subprocess) launches console executables; .cmd/.ps1
+# wrappers are NOT launchable that way. Detect via Python's own install
+# layout (sysconfig scripts dir), which works in venvs AND CI layouts
+# where Get-Command's PATH scan proved unreliable, with a PATH fallback.
 $checkovRunnable = $false
 $needShim = $false
-if ($null -ne $checkovCmd) {
-    $src = [string]$checkovCmd.Source
-    if ($src -match '\.[eE][xX][eE]$') {
-        $checkovRunnable = $true
-    } elseif ($src -match '\.[cC][mM][dD]$') {
-        $needShim = $true
+$pyScripts = & $Script:Python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
+if ($LASTEXITCODE -eq 0 -and $pyScripts) {
+    $pyScripts = [string]$pyScripts
+    foreach ($name in @('checkov.exe', 'checkov')) {
+        $candidate = Join-Path $pyScripts $name
+        if (-not (Test-Path -LiteralPath $candidate)) { continue }
+        if ($name -eq 'checkov.exe') {
+            $checkovRunnable = $true
+        } else {
+            # Non-exe script present without an exe shim target.
+            $needShim = $true
+        }
+        break
+    }
+}
+if (-not ($checkovRunnable -or $needShim)) {
+    $checkovCmd = Get-Command checkov -ErrorAction SilentlyContinue
+    if ($null -ne $checkovCmd) {
+        $src = [string]$checkovCmd.Source
+        if ($src -match '\.[eE][xX][eE]$') {
+            $checkovRunnable = $true
+        } elseif ($src -match '\.[cC][mM][dD]$') {
+            $needShim = $true
+        }
     }
 }
 if ($needShim -and -not $SkipShim) {
@@ -172,8 +208,12 @@ if ($needShim -and -not $SkipShim) {
     if (-not (Test-Path -LiteralPath $csc)) {
         $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
     }
-    $pyExe = Join-Path $venvScripts 'python.exe'
-    if ((Test-Path -LiteralPath $csc) -and (Test-Path -LiteralPath $pyExe)) {
+    $pyExe = $Script:Python
+    if ($pyExe -eq 'python') {
+        $resolved = Get-Command python -ErrorAction SilentlyContinue
+        if ($null -eq $resolved) { $pyExe = '' } else { $pyExe = $resolved.Source }
+    }
+    if ($pyExe -and (Test-Path -LiteralPath $csc) -and (Test-Path -LiteralPath $pyExe)) {
         $binDir = Join-Path $Script:Tmp 'bin'
         New-Item -ItemType Directory -Path $binDir | Out-Null
         $cs = @'
@@ -277,6 +317,11 @@ $code = Invoke-SecureReview -ArgLine "scan $Script:Tmp\does-not-exist --fail-on 
 Write-Case -Name 'exit 2: path does not exist' -Expected 2 -Actual $code
 Assert-OutputContains -Name 'exit 2' -Needles @('error: path does not exist') -Lines $out.Value
 
+# Create the probe target explicitly: locally the console-script path
+# happens to leave out.txt behind as its own redirect target, but the
+# module fallback (CI) never creates it - scanning a nonexistent path is
+# a valid exit 2, but with the OTHER error marker, failing this probe.
+Set-Content -LiteralPath "$Script:Tmp\out.txt" -Value '' -Encoding ascii
 $code = Invoke-SecureReview -ArgLine "scan $Script:Tmp\out.txt --fail-on none" -Out $out
 Write-Case -Name 'exit 2: path is a file, not a directory' -Expected 2 -Actual $code
 Assert-OutputContains -Name 'exit 2 (file)' -Needles @('error: not a directory') -Lines $out.Value
@@ -320,8 +365,7 @@ if (-not $fullMode) {
 
 # --- SARIF 2.1.0 emission through the real library (full mode) ----------
 if ($fullMode) {
-    $probePy = Join-Path $venvScripts 'python.exe'
-    if (-not (Test-Path -LiteralPath $probePy)) { $probePy = 'python' }
+    $probePy = $Script:Python
     $probe = Join-Path $Script:Tmp 'sarif_probe.py'
     @'
 import json

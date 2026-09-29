@@ -19,10 +19,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Lints the workflow itself: actionlint validates syntax, expressions,
+  # and - via its shellcheck integration - every `run:` block, so parse
+  # errors and classic quoting/expansion mistakes fail here instead of
+  # burning the scan/e2e matrix. Verified limit: it cannot catch bash that
+  # parses but is wrong at runtime (the original quoted '```' fence) - see
+  # docs/testing.md sections 3.1 and 3.4.
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint and shellcheck (checksum-verified)
+        run: |
+          BIN="$RUNNER_TEMP/lint-bin"
+          mkdir -p "$BIN"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$BIN" actionlint
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/shellcheck.tar.gz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz"
+          # The koalaman v0.11.0 release ships no checksum asset; this hash
+          # was taken from the official release tarball over TLS when the pin
+          # was added. (Never start a comment with "shellcheck" here: that
+          # parses as a directive.)
+          echo "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6  $RUNNER_TEMP/shellcheck.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/shellcheck.tar.gz" -C "$BIN" --strip-components=1 shellcheck-v0.11.0/shellcheck
+          echo "$BIN" >> "$GITHUB_PATH"
+        shell: bash
+
+      - name: Lint workflows (actionlint + shellcheck on run blocks)
+        run: actionlint -color
+        shell: bash
+
   scan:
     runs-on: ubuntu-latest
     permissions:
-      contents: read # checkout and tool downloads only; nothing else
+      contents: read # checkout and tool downloads only
+      security-events: write # upload the SARIF report to code scanning
     steps:
       - name: Check out pull request
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,11 +93,18 @@ jobs:
       # Exit codes: 0 below threshold, 1 scanner execution problem,
       # 2 invalid path, 3 findings met or exceeded --fail-on. Any nonzero
       # exit fails the workflow; the gate lives in the CLI, not here.
+      # SARIF is written before the threshold evaluation, so the report
+      # exists for artifacts on gate failures (0/1/3) too, and it is
+      # written with a RELATIVE path: upload-sarif requires paths relative
+      # to the repository root so alert locations resolve on GitHub.
       - name: secure-review scan
-        run: secure-review scan "$GITHUB_WORKSPACE" --fail-on high 2>&1 | tee scan-summary.txt
+        run: |
+          set -o pipefail
+          secure-review scan "$GITHUB_WORKSPACE" --fail-on high --sarif secure-review.sarif 2>&1 | tee scan-summary.txt
         shell: bash
 
       - name: Generate JSON reports (static analysis only)
+        if: always()
         run: |
           REPORTS="$RUNNER_TEMP/secure-review-reports"
           mkdir -p "$REPORTS"
@@ -66,6 +113,7 @@ jobs:
           bandit -r . -f json -o "$REPORTS/bandit.json" || true
           checkov -d . --output json > "$REPORTS/checkov.json" || true
           trivy config --format json --output "$REPORTS/trivy.json" . || true
+          cp secure-review.sarif "$REPORTS/secure-review.sarif"
         shell: bash
 
       - name: Build Markdown summary
@@ -74,10 +122,10 @@ jobs:
           REPORTS="$RUNNER_TEMP/secure-review-reports"
           {
             echo "# secure-review scan summary"
-            '```'
+            printf '```text\n'
             cat scan-summary.txt
-            '```'
-            echo "JSON reports: bandit.json, checkov.json, trivy.json (workflow artifacts)."
+            printf '```\n'
+            echo "JSON reports: bandit.json, checkov.json, trivy.json, secure-review.sarif (workflow artifacts)."
           } > "$REPORTS/summary.md"
           cat "$REPORTS/summary.md" >> "$GITHUB_STEP_SUMMARY"
         shell: bash
@@ -90,9 +138,25 @@ jobs:
           path: ${{ runner.temp }}/secure-review-reports/
           if-no-files-found: error
 
+      # Puts the findings in the Security tab (and on the PR). Runs last so
+      # artifacts are already safe if the upload itself fails. The upload is
+      # allowed to fail WITHOUT failing the job: code scanning is free on
+      # public repos only, and this private repo (verified via API, 403 on
+      # code-scanning/default-setup) rejects uploads without Advanced
+      # Security. The outcome stays visible in the step status; if the repo
+      # ever becomes public or gains AS, drop continue-on-error.
+      - name: Upload SARIF to code scanning
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          sarif_file: secure-review.sarif
+
   # Proves the exit-code contract and SARIF emission on Windows runners,
-  # via scripts/e2e.ps1 (FULL mode: pip-built checkov.exe works on normal
-  # paths; trivy found on PATH from setup-trivy). Same pinned actions.
+  # via scripts/e2e.ps1 (FULL mode: sysconfig detection + the csc shim make
+  # checkov runnable even where pip only emits a .cmd wrapper, and trivy is
+  # unpacked into %TEMP%\trivy-bin where the script auto-detects it -
+  # setup-trivy's PATH edit does not reach the pwsh step). Same pinned actions.
   e2e-windows:
     runs-on: windows-latest
     permissions:
@@ -124,6 +188,20 @@ jobs:
       - name: Run test suite
         run: python -m pytest -q
         shell: bash
+
+      # setup-trivy's PATH edit does not reach the pwsh step on Windows
+      # runners (first e2e run: REDUCED, trivy present: False), so put the
+      # pinned binary where scripts/e2e.ps1 auto-detects it.
+      - name: Install Trivy for e2e (checksum-verified)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:RUNNER_TEMP 'trivy-bin'
+          New-Item -ItemType Directory -Path $bin -Force | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_windows-64bit.zip' -OutFile "$env:RUNNER_TEMP\trivy.zip"
+          $hash = (Get-FileHash "$env:RUNNER_TEMP\trivy.zip" -Algorithm SHA256).Hash
+          if ($hash -ne '94c40e0696e4b907a74b7b2e1438d5d72ebaca83115817407f568a002d520842') { exit 1 }
+          Expand-Archive -Path "$env:RUNNER_TEMP\trivy.zip" -DestinationPath $bin -Force
+        shell: pwsh
 
       - name: Run e2e contract probes
         run: scripts\e2e.ps1
