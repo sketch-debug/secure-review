@@ -129,3 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         return _run_scan(args.path, args.fail_on, args.sarif)
     print(USAGE_LINE)
     return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - run via `python -m secure_review.cli`
+    raise SystemExit(main())

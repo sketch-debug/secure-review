@@ -19,6 +19,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Lints the workflow itself: actionlint validates syntax, expressions,
+  # and - via its shellcheck integration - every `run:` block, so parse
+  # errors and classic quoting/expansion mistakes fail here instead of
+  # burning the scan/e2e matrix. Verified limit: it cannot catch bash that
+  # parses but is wrong at runtime (the original quoted '```' fence) - see
+  # docs/testing.md sections 3.1 and 3.4.
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint and shellcheck (checksum-verified)
+        run: |
+          BIN="$RUNNER_TEMP/lint-bin"
+          mkdir -p "$BIN"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$BIN" actionlint
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/shellcheck.tar.gz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz"
+          # The koalaman v0.11.0 release ships no checksum asset; this hash
+          # was taken from the official release tarball over TLS when the pin
+          # was added. (Never start a comment with "shellcheck" here: that
+          # parses as a directive.)
+          echo "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6  $RUNNER_TEMP/shellcheck.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/shellcheck.tar.gz" -C "$BIN" --strip-components=1 shellcheck-v0.11.0/shellcheck
+          echo "$BIN" >> "$GITHUB_PATH"
+        shell: bash
+
+      - name: Lint workflows (actionlint + shellcheck on run blocks)
+        run: actionlint -color
+        shell: bash
+
   scan:
     runs-on: ubuntu-latest
     permissions:
@@ -53,11 +92,16 @@ jobs:
       # Exit codes: 0 below threshold, 1 scanner execution problem,
       # 2 invalid path, 3 findings met or exceeded --fail-on. Any nonzero
       # exit fails the workflow; the gate lives in the CLI, not here.
+      # SARIF is written before the threshold evaluation, so the report
+      # exists for artifacts on gate failures (0/1/3) too.
       - name: secure-review scan
-        run: secure-review scan "$GITHUB_WORKSPACE" --fail-on high 2>&1 | tee scan-summary.txt
+        run: |
+          set -o pipefail
+          secure-review scan "$GITHUB_WORKSPACE" --fail-on high --sarif "$RUNNER_TEMP/secure-review.sarif" 2>&1 | tee scan-summary.txt
         shell: bash
 
       - name: Generate JSON reports (static analysis only)
+        if: always()
         run: |
           REPORTS="$RUNNER_TEMP/secure-review-reports"
           mkdir -p "$REPORTS"
@@ -66,6 +110,7 @@ jobs:
           bandit -r . -f json -o "$REPORTS/bandit.json" || true
           checkov -d . --output json > "$REPORTS/checkov.json" || true
           trivy config --format json --output "$REPORTS/trivy.json" . || true
+          cp "$RUNNER_TEMP/secure-review.sarif" "$REPORTS/secure-review.sarif"
         shell: bash
 
       - name: Build Markdown summary
@@ -74,10 +119,10 @@ jobs:
           REPORTS="$RUNNER_TEMP/secure-review-reports"
           {
             echo "# secure-review scan summary"
-            '```'
+            printf '```text\n'
             cat scan-summary.txt
-            '```'
-            echo "JSON reports: bandit.json, checkov.json, trivy.json (workflow artifacts)."
+            printf '```\n'
+            echo "JSON reports: bandit.json, checkov.json, trivy.json, secure-review.sarif (workflow artifacts)."
           } > "$REPORTS/summary.md"
           cat "$REPORTS/summary.md" >> "$GITHUB_STEP_SUMMARY"
         shell: bash
