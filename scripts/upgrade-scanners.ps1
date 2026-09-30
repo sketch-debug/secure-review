@@ -351,8 +351,10 @@ Write-Host @'
    the "last full run: N findings" line, section-4 expectations).
 2. Run the e2e harness against the new scanners before pushing:
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\e2e.ps1
-   Expect 12 passed, 0 failed - and confirm the SARIF-OK count matches the
-   docs numbers you just updated.
+   Expect 13 passed, 0 failed. The SARIF-OK count is ENFORCED against
+   -MinFindings (default 20): a new scanner version that legitimately finds
+   more/fewer issues may require re-pinning the floor - and the docs counts
+   in the same commit.
 3. Update stale prose/comments listed above ONLY after re-verifying the
    claim against the new scanner (run the snippet, look at the output).
 4. Push and watch:  gh pr checks <N> --watch

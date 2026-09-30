@@ -151,12 +151,13 @@ Probes:
   [ok] exit 0 output mentions expected markers
   [ok] exit 3: default threshold, all scanners installed -> exit 3 (expected 3)
   [ok] SARIF 2.1.0 emission matches parsed findings (SARIF-OK 24)
+  [ok] finding count 24 meets the pinned floor of 20 (-MinFindings)
   [ok] SARIF log validates against the official 2.1.0 schema (SCHEMA-OK)
 
-e2e summary: 12 passed, 0 failed, 0 skipped
+e2e summary: 13 passed, 0 failed, 0 skipped
 ```
 
-Reduced mode prints `[SKIP]` for the exit-3/exit-0 probes with the reason, and the exit-1 probe becomes the real missing-scanner probe (verified: `6 passed, 0 failed, 1 skipped` with `-SkipShim`). Official-schema validation degrades honestly: `SCHEMA-UNAVAILABLE` (no `jsonschema`, or schemastore unreachable) is a skip, never a false failure; only a real `SCHEMA-FAIL` fails the run. (Verified: FULL mode `12 passed, 0 failed, 0 skipped`, `SARIF-OK 24` + `SCHEMA-OK`.) Note `jsonschema` is not a declared dependency of this package — it arrives transitively via checkov, which is why CI (which installs checkov 3.3.20) validates too; anything else skips the schema check but never fakes it.
+Reduced mode prints `[SKIP]` for the exit-3/exit-0 probes with the reason, and the exit-1 probe becomes the real missing-scanner probe (verified: `6 passed, 0 failed, 1 skipped` with `-SkipShim`). Official-schema validation degrades honestly: `SCHEMA-UNAVAILABLE` (no `jsonschema`, or schemastore unreachable) is a skip, never a false failure; only a real `SCHEMA-FAIL` fails the run. (Verified: FULL mode `13 passed, 0 failed, 0 skipped`, `SARIF-OK 24` + `SCHEMA-OK`.) In FULL mode the SARIF-OK count is also **enforced**: a finding count below `-MinFindings` (default 20, `0` disables) fails the run — the canary from §4 is now a red gate, not a note. Note `jsonschema` is not a declared dependency of this package — it arrives transitively via checkov, which is why CI (which installs checkov 3.3.20) validates too; anything else skips the schema check but never fakes it.
 
 ### Reference: manual full-mode sweep (what the script automates)
 
@@ -277,7 +278,7 @@ On CI this is the `scan` job itself, which additionally uploads artifacts and (l
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\e2e.ps1
 ```
 
-Expect `12 passed, 0 failed, 0 skipped`, `SARIF-OK 24` + `SCHEMA-OK`. **Treat `SARIF-OK <n>` as a canary:** it is the only signal in the whole chain that counts parsed findings. It dropped 24 → 14 when the arg-order bug zeroed checkov, with every pass/fail probe still green. A drop without a deliberate scanner-upgrade reason means findings are being lost — stop and investigate.
+Expect `13 passed, 0 failed, 0 skipped`, `SARIF-OK 24` + `SCHEMA-OK`. **`SARIF-OK <n>` is the finding-loss canary, and it is enforced:** it is the only signal in the whole chain that counts parsed findings, so a drop now fails the run instead of waiting for a human to notice. It dropped 24 → 14 when the arg-order bug zeroed checkov with every pass/fail probe still green; under the current floor (`-MinFindings`, default 20) that same bug turns e2e — and CI — red. Raise the floor only when the target itself gains findings; pass `0` to disable for a one-off experiment.
 
 **Layer 5 — CI (the clean-machine proof).** Push, then watch: `gh pr checks <N> --watch`. Green here means the suite, a real scan with SARIF upload, and the full e2e harness all passed on machines that share nothing with this one.
 
