@@ -56,3 +56,22 @@ The first cut replaced *every* 64-hex string in the workflow with the new trivy 
 - **Idempotent recapture**: two consecutive runs at the same versions produce byte-identical fixture files (sha256-checked). If a recapture diff shows pure reorderings or path churn again, a new noise field appeared — extend the normalization deliberately, never by loosening "verbatim".
 - **Guard**: without `-Force`, the script refuses when the pins already match the requested versions.
 - **Failure atomicity**: any failure before the promote step leaves the working tree untouched (`.new` files live in scratch); a red suite after promotion leaves changes uncommitted for inspection.
+
+## Live-fire verification log (2026-09-30)
+
+Every path in the script has fired against a real version transition. The wrinkle: on that day **all three pins were already the latest releases** (checkov 3.3.20 uploaded three days prior, trivy v0.74.0, bandit 1.9.4), so the "upgrade" was exercised by simulating an honest past on a throwaway branch: downgrade the venv to checkov 3.3.19, falsify the provenance assert to claim 3.3.19, then let the script drive back to 3.3.20.
+
+What fired, in order — none of it staged or rehearsed:
+
+1. **Preflight refusal.** The first run bounced with `venv checkov is 3.3.19, not 3.3.20 — pip install checkov==3.3.20 first`. The operator (me) had skipped step 0; the script caught it. It upgrades nothing, by contract.
+2. **Guard refusal.** A same-versions run without `-Force` was refused (`provenance gates already claim ...; nothing to upgrade`).
+3. **The real upgrade run.** Preflight verified the freshly installed 3.3.20, gates claimed 3.3.19, capture ran from the committed tree, delta printed `SAME` (2 + 2 rule sets across 3.3.19 → 3.3.20), the trivy zip hash was re-pinned, and the suite passed 95/95. The recapture reproduced the committed fixture **byte-for-byte** — the canonical normalization survived a real version transition.
+4. **The `-Commit` path.** With a stale-fixture world committed first, `-Force -Commit` produced its templated commit staging exactly the one repaired file; the net diff of the whole round trip against `main` was empty.
+5. **Empty-commit refusal.** When a repair landed on content identical to HEAD, `-Commit` exited 1 with `nothing to commit - pins and fixtures already match` instead of creating a nothing commit.
+
+Two gotchas worth keeping:
+
+- **"Latest" on PyPI is `info.version`, not the last `releases` entry.** The `releases` object's keys sort lexically, so the naive list-tail read reports `3.3.9` as newer than `3.3.20`. Sort by parsed version, or trust `info.version`.
+- **`nothing to commit` is an exit-1 guard, not a crash.** A repair that lands byte-identical to HEAD (e.g. re-running after a falsification was already repaired) is a successful upgrade with no diff; the script says so and stops. Don't read the nonzero exit as a failure to upgrade.
+
+The throwaway branch was deleted after the round trip; `main` was byte-identical before and after, which is itself the strongest statement the recapture normalization makes: an upgrade that changes no behavior changes no bytes.
