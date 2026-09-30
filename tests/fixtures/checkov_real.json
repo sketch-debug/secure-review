@@ -10,28 +10,25 @@
                     "result": "PASSED",
                     "entity": {
                         "aws_ebs_volume": {
-                            "bad": {
+                            "logs": {
                                 "__end_line__": 4,
                                 "__start_line__": 1,
                                 "availability_zone": [
                                     "us-east-1a"
                                 ],
                                 "size": [
-                                    8
+                                    40
                                 ],
-                                "__address__": "aws_ebs_volume.bad"
+                                "__address__": "aws_ebs_volume.logs"
                             }
                         }
                     },
-                    "evaluated_keys": [
-                        "encrypted",
-                        "resource_type"
-                    ]
+                    "evaluated_keys": ["encrypted", "resource_type"]
                 },
                 "code_block": [
                     [
                         1,
-                        "resource \"aws_ebs_volume\" \"bad\" {\n"
+                        "resource \"aws_ebs_volume\" \"logs\" {\n"
                     ],
                     [
                         2,
@@ -39,7 +36,7 @@
                     ],
                     [
                         3,
-                        "  size              = 8\n"
+                        "  size              = 40\n"
                     ],
                     [
                         4,
@@ -47,13 +44,13 @@
                     ]
                 ],
                 "file_path": "\\main.tf",
-                "file_abs_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf",
-                "repo_file_path": "/AppData/Local/Temp/sr-iac/main.tf",
+                "file_abs_path": "<capture-dir>\\main.tf",
+                "repo_file_path": "/AppData/Local/Temp/<capture-dir>/main.tf",
                 "file_line_range": [
                     1,
                     4
                 ],
-                "resource": "aws_ebs_volume.bad",
+                "resource": "aws_ebs_volume.logs",
                 "evaluations": null,
                 "check_class": "checkov.common.graph.checks_infra.base_check",
                 "fixed_definition": null,
@@ -71,7 +68,7 @@
                 "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-only-encrypted-ebs-volumes-are-attached-to-ec2-instances",
                 "details": [],
                 "check_len": null,
-                "definition_context_file_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf"
+                "definition_context_file_path": "<capture-dir>\\main.tf"
             }
         ],
         "failed_checks": [
@@ -88,7 +85,7 @@
                 "code_block": [
                     [
                         1,
-                        "resource \"aws_ebs_volume\" \"bad\" {\n"
+                        "resource \"aws_ebs_volume\" \"logs\" {\n"
                     ],
                     [
                         2,
@@ -96,7 +93,7 @@
                     ],
                     [
                         3,
-                        "  size              = 8\n"
+                        "  size              = 40\n"
                     ],
                     [
                         4,
@@ -104,13 +101,13 @@
                     ]
                 ],
                 "file_path": "\\main.tf",
-                "file_abs_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf",
-                "repo_file_path": "/AppData/Local/Temp/sr-iac/main.tf",
+                "file_abs_path": "<capture-dir>\\main.tf",
+                "repo_file_path": "/AppData/Local/Temp/<capture-dir>/main.tf",
                 "file_line_range": [
                     1,
                     4
                 ],
-                "resource": "aws_ebs_volume.bad",
+                "resource": "aws_ebs_volume.logs",
                 "evaluations": null,
                 "check_class": "checkov.terraform.checks.resource.aws.EBSEncryption",
                 "fixed_definition": null,
@@ -128,7 +125,7 @@
                 "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/general-3-encrypt-ebs-volume",
                 "details": [],
                 "check_len": null,
-                "definition_context_file_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf"
+                "definition_context_file_path": "<capture-dir>\\main.tf"
             },
             {
                 "check_id": "CKV_AWS_189",
@@ -143,7 +140,7 @@
                 "code_block": [
                     [
                         1,
-                        "resource \"aws_ebs_volume\" \"bad\" {\n"
+                        "resource \"aws_ebs_volume\" \"logs\" {\n"
                     ],
                     [
                         2,
@@ -151,7 +148,7 @@
                     ],
                     [
                         3,
-                        "  size              = 8\n"
+                        "  size              = 40\n"
                     ],
                     [
                         4,
@@ -159,13 +156,13 @@
                     ]
                 ],
                 "file_path": "\\main.tf",
-                "file_abs_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf",
-                "repo_file_path": "/AppData/Local/Temp/sr-iac/main.tf",
+                "file_abs_path": "<capture-dir>\\main.tf",
+                "repo_file_path": "/AppData/Local/Temp/<capture-dir>/main.tf",
                 "file_line_range": [
                     1,
                     4
                 ],
-                "resource": "aws_ebs_volume.bad",
+                "resource": "aws_ebs_volume.logs",
                 "evaluations": null,
                 "check_class": "checkov.terraform.checks.resource.aws.EBSVolumeEncryptedWithCMK",
                 "fixed_definition": null,
@@ -183,7 +180,7 @@
                 "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/bc-aws-general-109",
                 "details": [],
                 "check_len": null,
-                "definition_context_file_path": "C:\\Users\\jeffr\\AppData\\Local\\Temp\\sr-iac\\main.tf"
+                "definition_context_file_path": "<capture-dir>\\main.tf"
             }
         ],
         "skipped_checks": [],

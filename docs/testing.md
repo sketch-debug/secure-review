@@ -64,7 +64,7 @@ Subsets:
 
 ### Fixtures carry provenance gates
 
-`tests/fixtures/checkov_real.json` and `tests/fixtures/trivy_real.json` are verbatim captures of real scanner output. The tests **assert provenance fields** (`checkov_version == "3.3.20"`, `Trivy.Version == "0.74.0"`, `SchemaVersion == 2`). If a scanner upgrade changes its JSON shape, these tests fail loudly instead of silently losing findings. If you upgrade a scanner, regenerate the fixture from real output and update the provenance gate in the same commit.
+`tests/fixtures/checkov_real.json` and `tests/fixtures/trivy_real.json` are verbatim captures of real scanner output, captured from the committed source tree `tests/fixtures/tree/` (machine-noise fields only are normalized to `<capture-dir>`-style markers so recaptures diff cleanly — see `docs/scanner-upgrades.md`). The tests **assert provenance fields** (`checkov_version == "3.3.20"`, `Trivy.Version == "0.74.0"`, `SchemaVersion == 2`). If a scanner upgrade changes its JSON shape, these tests fail loudly instead of silently losing findings. To upgrade a scanner, run `scripts/upgrade-scanners.ps1` — it recaptures, flips the pins, runs the suite, and commits in one step.
 
 ### Windows quirks of this machine
 
