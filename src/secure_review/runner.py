@@ -17,6 +17,32 @@ from secure_review.findings import Finding
 
 DEFAULT_TIMEOUT_SECONDS = 300
 
+# Directories every scanner skips by default. Virtualenvs and JS dependency
+# trees are vendor code: scanning them is noise at best and, for bandit
+# recursing a whole .venv, a guaranteed timeout at worst.
+DEFAULT_SCAN_EXCLUDES = (".venv", "node_modules")
+
+
+def _skip_dirs(dirs: tuple[str, ...]) -> str:
+    """Value shape for checkov --skip-path and trivy --skip-dirs.
+
+    Empirically pinned on the pinned versions (3.3.20 / v0.74.0): a bare
+    comma-joined directory list. Trivy control run: 27 misconfigurations
+    across .venv/node_modules targets -> 9, targets only "." and main.tf.
+    """
+    return ",".join(dirs)
+
+
+def _skip_globs(dirs: tuple[str, ...]) -> str:
+    """Value shape for bandit -x.
+
+    Empirically pinned on bandit 1.9.4: -x takes GLOB patterns, and bare
+    directory names are ignored (control 9 findings -> still 6 with
+    ".venv"; the glob form 3, only the root file). Each dir becomes
+    */<dir>/* so nested trees match on both path separators.
+    """
+    return ",".join(f"*/{d}/*" for d in dirs)
+
 
 @dataclass(frozen=True)
 class ScannerSpec:
@@ -30,6 +56,10 @@ class ScannerSpec:
     binary: str
     args: tuple[str, ...]
     parser: Callable[[str, str], list[Finding]]  # (stdout, scanner name)
+    # (flag, value-formatter) wiring DEFAULT_SCAN_EXCLUDES into this
+    # scanner's args; each scanner names its own flag and expects its own
+    # value shape (_skip_dirs vs _skip_globs). None leaves excludes out.
+    exclude: tuple[str, Callable[[tuple[str, ...]], str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -120,12 +150,24 @@ def _parse_trivy(raw: str, scanner: str) -> list[Finding]:
 # The scanner registry: one spec per scanner, parser attached. args
 # MUST include the JSON-report flags (the single run's stdout is the
 # parseable report) positioned so value-taking flags stay adjacent to
-# their values. Tests pin parser shapes so scanner upgrades that change
-# them fail loudly instead of silently losing findings.
+# their values. The scan target is appended directly after args (so a
+# trailing value-taking flag such as checkov's -d receives it), and the
+# exclude flags are appended after the target. Tests pin parser shapes
+# so scanner upgrades that change them fail loudly instead of silently
+# losing findings.
 SCANNERS: tuple[ScannerSpec, ...] = (
-    ScannerSpec("Checkov", "checkov", ("--output", "json", "-d"), _parse_checkov),
-    ScannerSpec("Trivy config", "trivy", ("config", "--format", "json"), _parse_trivy),
-    ScannerSpec("Bandit", "bandit", ("-f", "json", "-r"), _parse_bandit),
+    ScannerSpec(
+        "Checkov", "checkov", ("--output", "json", "-d"), _parse_checkov,
+        exclude=("--skip-path", _skip_dirs),
+    ),
+    ScannerSpec(
+        "Trivy config", "trivy", ("config", "--format", "json"), _parse_trivy,
+        exclude=("--skip-dirs", _skip_dirs),
+    ),
+    ScannerSpec(
+        "Bandit", "bandit", ("-f", "json", "-r"), _parse_bandit,
+        exclude=("-x", _skip_globs),
+    ),
 )
 
 
@@ -137,9 +179,19 @@ def scan_path(target: Path, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> l
         if shutil.which(spec.binary) is None:
             results.append(ScannerResult(spec.name, "missing", None))
             continue
+        args = (*spec.args, target_str)
+        if spec.exclude is not None:
+            # Exclude flags go AFTER the positional target, never between
+            # args and it: checkov 3.3.20's -d is value-taking, and
+            # "--skip-path" directly after "-d" makes argparse die with
+            # "argument -d/--directory: expected one argument" (rc 2, no
+            # stdout), so checkov findings silently vanish. Empirically
+            # pinned on all three scanners at their pinned versions.
+            flag, format_value = spec.exclude
+            args = (*args, flag, format_value(DEFAULT_SCAN_EXCLUDES))
         try:
             completed = subprocess.run(
-                [spec.binary, *spec.args, target_str],
+                [spec.binary, *args],
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,

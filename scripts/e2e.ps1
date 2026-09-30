@@ -40,6 +40,15 @@
     interpreter when present, else `python` on PATH (CI installs the
     package into the setup-python interpreter).
 
+.PARAMETER MinFindings
+    FULL mode only: the SARIF-OK probe fails when the parsed finding count
+    drops below this floor. The count is the only canary in the chain that
+    catches silent checkov-style regressions: a scanner argv-order bug once
+    zeroed every checkov finding while all exit-code probes stayed green
+    (24 -> 14, noticed by hand). Default 20 (the vulnerable tree currently
+    yields 24: 10 checkov + 11 trivy + 3 bandit). Raise it when the target
+    grows; pass 0 to disable.
+
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts\e2e.ps1
 #>
@@ -52,7 +61,11 @@ param(
     # Force REDUCED mode even when the environment could support FULL:
     # skips the csc.exe checkov shim build and the trivy-dependent probes.
     # Useful to prove the reduced path deterministically.
-    [switch]$SkipShim
+    [switch]$SkipShim,
+    # FULL mode only: floor for the SARIF-OK finding count (see
+    # .PARAMETER MinFindings). 0 disables the check.
+    [ValidateRange(0, 2147483647)]
+    [int]$MinFindings = 20
 )
 
 Set-StrictMode -Version 2.0
@@ -428,6 +441,23 @@ else:
         $Script:PassCount++
         $okLine = ($sarifOut | Where-Object { $_ -match 'SARIF-OK' } | Select-Object -First 1)
         Write-Host ("  [ok] SARIF 2.1.0 emission matches parsed findings ({0})" -f $okLine)
+        # Finding-count canary: a silent scanner regression (bad argv, a
+        # parser drift, an over-broad exclude) zeroes one scanner's findings
+        # while every exit-code probe above stayed green. Fail loudly when
+        # the count drops below the pinned floor; 0 disables.
+        if ($MinFindings -gt 0) {
+            # Anchor the digits to the line END: an unanchored pattern once
+            # grabbed a prefix here and reported 2 instead of 24.
+            $count = [int]($okLine -replace '^.*SARIF-OK (\d+)\s*$', '$1')
+            if ($count -lt $MinFindings) {
+                $Script:FailCount++
+                Write-Host ("  [FAIL] finding-count floor: SARIF-OK {0} is below the pinned floor of {1} (-MinFindings)" -f $count, $MinFindings)
+                Write-Host '       a scanner is probably silently producing no findings; re-pin the floor ONLY after proving the drop is intended'
+            } else {
+                $Script:PassCount++
+                Write-Host ("  [ok] finding count {0} meets the pinned floor of {1} (-MinFindings)" -f $count, $MinFindings)
+            }
+        }
         $schemaLine = ($sarifOut | Where-Object { $_ -match 'SCHEMA-OK' } | Select-Object -First 1)
         if ($null -ne $schemaLine) {
             $Script:PassCount++

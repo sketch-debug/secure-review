@@ -3,9 +3,9 @@
   "Trivy": {
     "Version": "0.74.0"
   },
-  "ReportID": "01a0e6da-c21e-7097-996f-d6f358151cd2",
-  "CreatedAt": "2026-09-28T15:11:31.3580387+08:00",
-  "ArtifactName": "C:/Users/jeffr/AppData/Local/Temp/sr-iac",
+  "ReportID": "<report-id>",
+  "CreatedAt": "<created-at>",
+  "ArtifactName": "<capture-dir>",
   "ArtifactType": "filesystem",
   "Results": [
     {
@@ -43,7 +43,7 @@
           ],
           "Status": "FAIL",
           "CauseMetadata": {
-            "Resource": "aws_ebs_volume.bad",
+            "Resource": "aws_ebs_volume.logs",
             "Provider": "AWS",
             "Service": "ec2",
             "StartLine": 1,
@@ -52,11 +52,11 @@
               "Lines": [
                 {
                   "Number": 1,
-                  "Content": "resource \"aws_ebs_volume\" \"bad\" {",
+                  "Content": "resource \"aws_ebs_volume\" \"logs\" {",
                   "IsCause": true,
                   "Annotation": "",
                   "Truncated": false,
-                  "Highlighted": "\u001b[38;5;33mresource\u001b[0m \u001b[38;5;37m\"aws_ebs_volume\"\u001b[0m \u001b[38;5;37m\"bad\"\u001b[0m {",
+                  "Highlighted": "\u001b[38;5;33mresource\u001b[0m \u001b[38;5;37m\"aws_ebs_volume\"\u001b[0m \u001b[38;5;37m\"logs\"\u001b[0m {",
                   "FirstCause": true,
                   "LastCause": false
                 },
@@ -72,11 +72,11 @@
                 },
                 {
                   "Number": 3,
-                  "Content": "  size              = 8",
+                  "Content": "  size              = 40",
                   "IsCause": true,
                   "Annotation": "",
                   "Truncated": false,
-                  "Highlighted": "\u001b[0m  \u001b[38;5;245msize\u001b[0m              = \u001b[38;5;37m8",
+                  "Highlighted": "\u001b[0m  \u001b[38;5;245msize\u001b[0m              = \u001b[38;5;37m40",
                   "FirstCause": false,
                   "LastCause": false
                 },
@@ -111,7 +111,7 @@
           ],
           "Status": "FAIL",
           "CauseMetadata": {
-            "Resource": "aws_ebs_volume.bad",
+            "Resource": "aws_ebs_volume.logs",
             "Provider": "AWS",
             "Service": "ec2",
             "StartLine": 1,
@@ -120,11 +120,11 @@
               "Lines": [
                 {
                   "Number": 1,
-                  "Content": "resource \"aws_ebs_volume\" \"bad\" {",
+                  "Content": "resource \"aws_ebs_volume\" \"logs\" {",
                   "IsCause": true,
                   "Annotation": "",
                   "Truncated": false,
-                  "Highlighted": "\u001b[38;5;33mresource\u001b[0m \u001b[38;5;37m\"aws_ebs_volume\"\u001b[0m \u001b[38;5;37m\"bad\"\u001b[0m {",
+                  "Highlighted": "\u001b[38;5;33mresource\u001b[0m \u001b[38;5;37m\"aws_ebs_volume\"\u001b[0m \u001b[38;5;37m\"logs\"\u001b[0m {",
                   "FirstCause": true,
                   "LastCause": false
                 },
@@ -140,11 +140,11 @@
                 },
                 {
                   "Number": 3,
-                  "Content": "  size              = 8",
+                  "Content": "  size              = 40",
                   "IsCause": true,
                   "Annotation": "",
                   "Truncated": false,
-                  "Highlighted": "\u001b[0m  \u001b[38;5;245msize\u001b[0m              = \u001b[38;5;37m8",
+                  "Highlighted": "\u001b[0m  \u001b[38;5;245msize\u001b[0m              = \u001b[38;5;37m40",
                   "FirstCause": false,
                   "LastCause": false
                 },
